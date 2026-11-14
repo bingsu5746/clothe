@@ -5,6 +5,7 @@ import {
   SESSION_COOKIE, SESSION_DAYS, checkLoginLock, clearLoginFailures, createSessionToken, recordLoginFailure, timingSafeEqual, verifySessionToken,
 } from "./lib/auth";
 import { HttpError } from "./lib/util";
+import { ensureSchema } from "./lib/schema";
 import items from "./routes/items";
 import outfits from "./routes/outfits";
 import inspirations from "./routes/inspirations";
@@ -26,6 +27,12 @@ function sessionSecret(env: AppEnv["Bindings"]): string {
   if (!s) throw new HttpError(503, "APP_PIN 시크릿이 설정되지 않았어요");
   return s;
 }
+
+// 처음 요청 때 DB 테이블 자동 생성
+app.use("*", async (c, next) => {
+  await ensureSchema(c.env.DB);
+  await next();
+});
 
 app.post("/auth/login", async (c) => {
   if (!c.env.APP_PIN) throw new HttpError(503, "APP_PIN 시크릿이 설정되지 않았어요");

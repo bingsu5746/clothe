@@ -15,58 +15,25 @@
 
 아직 없는 것 (기획서의 뒷단계): 퍼스널 컬러/체형 진단, 가상 피팅, 여행 짐 싸기, 거울 셀카 자동 기록, 옷 사진 배경 제거.
 
-## 처음 배포하기
+## 배포 (Life 앱과 같은 방식)
 
-PC 터미널에서 이 저장소 폴더 기준:
+GitHub에 코드가 올라가면 Cloudflare가 알아서 빌드하고 배포합니다. 처음 한 번만 Cloudflare 대시보드에서:
 
-```bash
-npm install
-npx wrangler login
-```
+1. Workers & Pages → `clothe` → Settings → Build → **Connect** → GitHub 저장소 `bingsu5746/clothe` 선택
+   - Build command: `npm run build`
+   - Deploy command: `npx wrangler deploy`
+2. Settings → Variables and Secrets 에 Secret 2개 추가
+   - `APP_PIN`: 로그인 PIN (공개 주소라 6자리 이상 권장. 15분에 5번 틀리면 15분 잠김)
+   - `GEMINI_API_KEY`: [Google AI Studio](https://aistudio.google.com/apikey)에서 발급
+   - (선택) `SHORTCUT_TOKEN`: iPhone 단축어용 아무 긴 문자열. 없으면 단축어 저장이 꺼져 있어요.
+   - (선택) `SESSION_SECRET`: 없으면 APP_PIN으로 대신해요.
 
-1. D1 데이터베이스와 R2 버킷 만들기
-
-```bash
-npx wrangler d1 create clothe-db
-npx wrangler r2 bucket create clothe-images
-```
-
-`d1 create`가 출력한 `database_id`를 `wrangler.jsonc`의 `database_id` 자리에 붙여 넣고 커밋하세요.
-
-2. 시크릿 4개 넣기 (각각 값을 물어봐요)
-
-```bash
-npx wrangler secret put APP_PIN
-npx wrangler secret put SESSION_SECRET
-npx wrangler secret put SHORTCUT_TOKEN
-npx wrangler secret put GEMINI_API_KEY
-```
-
-- `APP_PIN`: 로그인 PIN. 15분에 5번 틀리면 15분 잠기지만, 공개 주소이니 6자리 이상을 권장해요.
-- `SESSION_SECRET`, `SHORTCUT_TOKEN`: 아무 긴 랜덤 문자열 (예: `openssl rand -hex 32`).
-- `GEMINI_API_KEY`: [Google AI Studio](https://aistudio.google.com/apikey)에서 발급.
-
-3. DB 테이블 만들고 배포
-
-```bash
-npm run deploy
-```
-
-`clothe.<계정>.workers.dev` 주소로 올라가요. 대시보드에서 만든 `clothe` Worker를 이 코드로 덮어씁니다.
-
-### GitHub 푸시로 자동 배포하고 싶다면
-
-Cloudflare 대시보드 → Workers → clothe → Settings → Build → Git 저장소 연결 후:
-- Build command: `npm run build`
-- Deploy command: `npx wrangler d1 migrations apply clothe-db --remote && npx wrangler deploy`
-
-(시크릿은 위 2번처럼 한 번만 넣어 두면 돼요.)
+D1 데이터베이스(`clothe-db`)와 R2 버킷(`clothe-images`)은 첫 배포 때 wrangler가 자동으로 만들고, DB 테이블은 앱이 첫 요청 때 자동으로 만들어요. 따로 실행할 명령은 없어요.
 
 ## 로컬 개발
 
 ```bash
 cp .dev.vars.example .dev.vars   # 값 채우기
-npm run db:migrate:local
 npm run dev
 ```
 

@@ -4,6 +4,16 @@ import { parseForecast } from "../shared/weather";
 import { createSessionToken, verifySessionToken } from "../worker/lib/auth";
 import { sanitizeOutfits } from "../worker/lib/stylist";
 import { todayKST } from "../worker/lib/util";
+import { splitSql } from "../worker/lib/schema";
+import { readFileSync } from "node:fs";
+
+describe("splitSql", () => {
+  it("스키마 파일을 문장 단위로 나누고 모두 IF NOT EXISTS다", () => {
+    const stmts = splitSql(readFileSync("migrations/0001_init.sql", "utf8"));
+    expect(stmts.length).toBe(9);
+    for (const s of stmts) expect(s).toMatch(/^CREATE (TABLE|INDEX) IF NOT EXISTS /);
+  });
+});
 
 describe("parseProductHtml", () => {
   it("JSON-LD Product를 우선 사용한다", () => {

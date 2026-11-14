@@ -1,5 +1,5 @@
 -- 옷장 아이템
-CREATE TABLE items (
+CREATE TABLE IF NOT EXISTS items (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   brand TEXT,
@@ -20,10 +20,10 @@ CREATE TABLE items (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_items_category ON items(category);
+CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
 
 -- 저장한 코디
-CREATE TABLE outfits (
+CREATE TABLE IF NOT EXISTS outfits (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   item_ids TEXT NOT NULL DEFAULT '[]',   -- JSON 배열
@@ -34,7 +34,7 @@ CREATE TABLE outfits (
 );
 
 -- 실제로 입은 기록 (착용 횟수 / CPW 용)
-CREATE TABLE outfit_logs (
+CREATE TABLE IF NOT EXISTS outfit_logs (
   id TEXT PRIMARY KEY,
   worn_date TEXT NOT NULL,
   outfit_id TEXT,
@@ -42,10 +42,10 @@ CREATE TABLE outfit_logs (
   weather_summary TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_logs_date ON outfit_logs(worn_date);
+CREATE INDEX IF NOT EXISTS idx_logs_date ON outfit_logs(worn_date);
 
 -- 인스타/핀터레스트 등에서 저장한 레퍼런스 코디 사진
-CREATE TABLE inspirations (
+CREATE TABLE IF NOT EXISTS inspirations (
   id TEXT PRIMARY KEY,
   image_key TEXT NOT NULL,
   source_url TEXT,
@@ -55,7 +55,7 @@ CREATE TABLE inspirations (
 );
 
 -- 위시리스트
-CREATE TABLE wishlist (
+CREATE TABLE IF NOT EXISTS wishlist (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   category TEXT,
@@ -72,14 +72,14 @@ CREATE TABLE wishlist (
 );
 
 -- AI 응답 캐시 (같은 입력이면 재호출하지 않음)
-CREATE TABLE ai_cache (
+CREATE TABLE IF NOT EXISTS ai_cache (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 단일 사용자 설정 (기본 위치 등)
-CREATE TABLE settings (
+CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
