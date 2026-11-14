@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clothe",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    // Gemini 모델 이름. '-latest' 별칭은 Google이 최신 Flash 모델로 자동 교체해 줌.
+    "GEMINI_MODEL": "gemini-flash-latest"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "clothe-db",
+      // `npx wrangler d1 create clothe-db` 실행 후 나온 database_id로 바꿔 주세요.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      // `npx wrangler r2 bucket create clothe-images` 로 만들어 주세요.
+      "bucket_name": "clothe-images"
+    }
+  ]
+}
