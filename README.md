@@ -17,9 +17,9 @@
 
 ## 배포 (Life 앱과 같은 방식)
 
-GitHub에 코드가 올라가면 Cloudflare가 알아서 빌드하고 배포합니다. 처음 한 번만 Cloudflare 대시보드에서:
+`main` 브랜치에 코드가 올라가면 Cloudflare가 알아서 빌드하고 배포합니다. 수정은 작업 브랜치 → PR → Merge 순서로 해요. 처음 한 번만 Cloudflare 대시보드에서:
 
-1. Workers & Pages → `clothe` → Settings → Build → **Connect** → GitHub 저장소 `bingsu5746/clothe` 선택
+1. Workers & Pages → `clothe` → Settings → Build → **Connect** → GitHub 저장소 `bingsu5746/clothe` 선택, 브랜치 `main`
    - Build command: `npm run build`
    - Deploy command: `npx wrangler deploy`
 2. Settings → Variables and Secrets 에 Secret 2개 추가
