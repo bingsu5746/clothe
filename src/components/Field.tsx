@@ -1,0 +1,79 @@
+import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
+import { SearchIcon } from "./icons";
+
+/** 입력칸 공통 모양. 글자 16px(확대 방지), 높이 48px, 채운 배경. */
+export const inputCls =
+  "block w-full min-h-12 rounded-md bg-surface-2 px-3.5 text-[16px] text-ink outline-none transition-shadow duration-(--dur-fast) placeholder:text-faint focus:shadow-[inset_0_0_0_1.5px_var(--ink)] disabled:opacity-50";
+
+export function Input({ className = "", ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...rest} className={`${inputCls} ${className}`} />;
+}
+
+export function Textarea({ className = "", ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea {...rest} className={`${inputCls} min-h-24 resize-y py-3 leading-normal ${className}`} />;
+}
+
+/** 검색칸 (돋보기 아이콘 포함) */
+export function SearchInput({ className = "", ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className={`relative ${className}`}>
+      <SearchIcon size={18} className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-muted" />
+      <input type="search" enterKeyHint="search" autoComplete="off" {...rest} className={`${inputCls} min-h-11 pl-10 [&::-webkit-search-cancel-button]:appearance-none`} />
+    </div>
+  );
+}
+
+export interface FieldProps {
+  label: string;
+  /** 라벨 오른쪽의 보조 설명이나 값 */
+  hint?: ReactNode;
+  children: ReactNode;
+  /**
+   * 버튼 묶음(Chip, Segmented)처럼 입력칸이 아닌 내용일 때 true.
+   * <label>로 감싸면 첫 버튼이 대신 눌리므로 role="group"으로 묶는다.
+   */
+  group?: boolean;
+  className?: string;
+}
+
+/** 라벨 + 입력칸 한 묶음 */
+export function Field({ label, hint, children, group, className = "" }: FieldProps) {
+  const head = (
+    <span className="mb-1.5 flex items-baseline justify-between gap-3">
+      <span className="text-footnote font-medium text-muted">{label}</span>
+      {hint != null && <span className="text-footnote text-muted tabular">{hint}</span>}
+    </span>
+  );
+  if (group)
+    return (
+      <div role="group" aria-label={label} className={`block ${className}`}>
+        {head}
+        {children}
+      </div>
+    );
+  return (
+    <label className={`block ${className}`}>
+      {head}
+      {children}
+    </label>
+  );
+}
+
+/** iOS식 켜고 끄기 스위치 */
+export function Switch({ checked, onChange, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-(--dur-base) after:absolute after:-inset-1.5 disabled:opacity-40 ${checked ? "bg-accent" : "bg-surface-3"}`}
+    >
+      <span
+        className={`absolute top-[2px] left-[2px] size-[27px] rounded-full shadow-2 transition-transform duration-(--dur-base) ease-emphasized ${checked ? "translate-x-5 bg-accent-ink" : "bg-white"}`}
+      />
+    </button>
+  );
+}

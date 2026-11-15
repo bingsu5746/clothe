@@ -3,17 +3,47 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#1a1917" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- 주소창/상태 표시줄 색. 아래 인라인 스크립트가 수동 테마에 맞게 두 값을 다시 맞춘다. -->
+    <meta name="theme-color" content="#faf9f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f0f0e" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
+    <!-- default: 상태 표시줄 글자색을 iOS가 라이트/다크에 맞춰 고른다 (black-translucent는 라이트 테마에서 글자가 안 보임) -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="옷장" />
+    <meta name="format-detection" content="telephone=no" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="stylesheet" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
     <title>내 옷장</title>
+    <script>
+      // 첫 화면이 그려지기 전에 테마를 정한다 (흰 화면 깜빡임 방지). src/lib/theme.ts와 같은 규칙.
+      (function () {
+        var root = document.documentElement;
+        var mode = "system";
+        try {
+          var saved = localStorage.getItem("clothe:theme");
+          if (saved === "light" || saved === "dark") mode = saved;
+        } catch (e) {}
+        var dark = mode === "dark" || (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        root.dataset.theme = dark ? "dark" : "light";
+        root.dataset.themeMode = mode;
+        if (mode !== "system") {
+          var metas = document.querySelectorAll('meta[name="theme-color"]');
+          for (var i = 0; i < metas.length; i++) metas[i].setAttribute("content", dark ? "#0f0f0e" : "#faf9f7");
+        }
+        if (!document.startViewTransition) root.classList.add("no-vt");
+        if (window.navigator.standalone || window.matchMedia("(display-mode: standalone)").matches) root.classList.add("standalone");
+      })();
+    </script>
+    <style>
+      /* CSS 파일이 오기 전에도 배경색이 맞도록 */
+      html { background: #faf9f7; }
+      html[data-theme="dark"] { background: #0f0f0e; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
