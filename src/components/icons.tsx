@@ -57,3 +57,14 @@ export const ShareIcon = make(<><path d="M12 15V3.5M8 7l4-4 4 4" /><path d="M6.5
 export const LogoutIcon = make(<><path d="M14 4.5H7A1.5 1.5 0 0 0 5.5 6v12A1.5 1.5 0 0 0 7 19.5h7" /><path d="M10.5 12H20M16.5 8.5 20 12l-3.5 3.5" /></>);
 export const WandIcon = make(<><path d="m4.5 19.5 10-10M13 8l3 3" /><path d="M17.5 3.5v3M16 5h3M20 10.5v2M19 11.5h2M9.5 3.5v2M8.5 4.5h2" /></>);
 export const ShirtIcon = make(<path d="M8.5 4 4 6.5l1.5 4 2-.8V20h9V9.7l2 .8 1.5-4L15.5 4a3.5 3.5 0 0 1-7 0Z" />);
+
+/* 2차 화면(프로필·피팅·여행·OOTD)에서 추가 */
+export const StarIcon = make(<path d="m12 3.8 2.5 5.2 5.7.8-4.1 4 1 5.6L12 16.7l-5.1 2.7 1-5.6-4.1-4 5.7-.8L12 3.8Z" />);
+export const MinusIcon = make(<path d="M5 12h14" />);
+export const ArrowUpIcon = make(<path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />);
+export const ArrowDownIcon = make(<path d="M12 5v14M6.5 13.5 12 19l5.5-5.5" />);
+export const ChevronLeftIcon = make(<path d="m14.5 5.5-6.5 6.5 6.5 6.5" />);
+export const EyedropperIcon = make(<><path d="m13.5 7.5 3 3" /><path d="M16.8 3.7a2.1 2.1 0 0 1 3 3l-2.3 2.3-3-3 2.3-2.3Z" /><path d="M14.5 8.5 6 17l-.5 2.5L8 19l8.5-8.5" /></>);
+export const DownloadIcon = make(<><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5" /><path d="M5 19.5h14" /></>);
+export const SelfieIcon = make(<><rect x="5.5" y="2.5" width="13" height="19" rx="2.5" /><circle cx="12" cy="10" r="2.6" /><path d="M8 17c.7-1.8 2.2-2.7 4-2.7s3.3.9 4 2.7" /></>);
+export const RotateIcon = make(<><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4v4h-4" /></>);
