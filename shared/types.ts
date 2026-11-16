@@ -436,3 +436,14 @@ export interface TryOn {
   created_at: string;
   updated_at: string;
 }
+
+/** POST /items/wear 응답 (items, worn_date는 2026-11-16에 추가된 필드) */
+export interface WearResult {
+  ok: true;
+  log_id: string;
+  duplicate: boolean;
+  /** 실제로 기록된 날짜 (date를 생략하면 서버의 한국 기준 오늘) */
+  worn_date: string;
+  /** 이 기록에 들어 있는 옷의 갱신된 상태 (wear_count, last_worn_date 포함) */
+  items: Item[];
+}

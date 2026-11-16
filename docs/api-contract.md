@@ -9,13 +9,16 @@
 - **인증**: `POST /auth/login`으로 받은 `clothe_session` 쿠키(HttpOnly, 180일)가 필요합니다. 예외는 `/auth/login`, `/auth/logout`, `/webhook/shortcut`(토큰 헤더), `/public/images/...`(서명 주소)뿐입니다. 쿠키가 없거나 틀리면 `401 { "error": "로그인이 필요해요" }`.
 - **오류 형식**: 실패하면 항상 `{ "error": "한국어 메시지" }` 하나입니다. 상태 코드:
   - `400` 입력 오류 (메시지에 어느 필드가 왜 틀렸는지: 예 `"평점: 5 이하여야 해요"`)
-  - `401` 로그인 필요 / PIN·토큰 틀림, `403` 서명 주소 만료
+  - `401` 로그인 필요 / PIN·토큰 틀림, `403` 서명 주소 만료 또는 다른 사이트에서 온 요청(아래 CSRF)
   - `404` 없음 (없는 id, 형식이 이상한 id 포함 — id는 `[A-Za-z0-9_-]{1,64}`), 없는 API는 `"없는 API예요"`
   - `409` 중복 (체크리스트 같은 이름 준비물)
   - `413` 요청이 너무 큼, `415` 지원하지 않는 이미지 형식
   - `422` AI가 처리를 거절(안전 필터)했거나 사진에서 옷을 못 찾음
   - `429` 사용 한도 초과 (Gemini 무료 한도, PIN 잠금, Replicate)
   - `502` 외부 서비스 오류 / AI 응답을 해석하지 못함, `503` 필요한 시크릿이 없음, `504` 외부 서비스 시간 초과
+- **CSRF**: 로그인이 필요한 경로에서 `GET/HEAD/OPTIONS`가 아닌 요청에 `Origin` 헤더가 있으면 같은 origin이어야 합니다. 다르면 `403 { "error": "다른 사이트에서 온 요청은 받을 수 없어요" }`. (같은 origin의 `fetch`는 그대로 동작)
+- **응답 헤더**: 모든 API 응답에 `x-content-type-options: nosniff`, `referrer-policy: no-referrer`, `x-frame-options: DENY`. JSON 응답은 `cache-control: no-store`(이미지는 아래 캐시 규칙). 이미지 응답에는 `content-security-policy: … sandbox`.
+- **링크 필드**(`original_shop_url`, `shop_url`, `image_url`, `source_url`): `http(s)://…` 이거나 scheme이 없는 글자만 받습니다. `javascript:`, `data:` 등은 `400 "…: http(s) 링크만 넣을 수 있어요"`. 예전에 저장된 그런 값은 응답에서 `null`로 내려갑니다.
 - **본문 크기**: 전체 요청 최대 9MB(이미지 업로드용). JSON 본문은 최대 64KB(로그인은 1KB). JSON이 아니거나 객체(`{}`)가 아니면 400.
 - **입력 규칙** (모든 JSON 필드 공통): 필드를 **보내지 않으면 "바꾸지 않음"**, `null` 또는 `""`를 보내면 **"비움(null)"**. 문자열은 앞뒤 공백을 자릅니다. 모르는 필드는 무시합니다. 문자열 배열은 빈 값·중복을 없앱니다.
 - **이미지 key**: `img/<uuid>.<ext>`(업로드) 또는 `tryon/<id>.<ext>`(피팅 결과). 다른 모양의 key는 400. 화면에서는 `/api/images/{key}`로 표시합니다.
@@ -29,7 +32,7 @@
 |---|---|---|---|
 | `APP_PIN` | 시크릿 | 필수 | 로그인 PIN. 없으면 로그인/인증 경로가 503 |
 | `GEMINI_API_KEY` | 시크릿 | AI 기능에 필수 | 없으면 AI 엔드포인트가 `503` "GEMINI_API_KEY가 설정되지 않았어요…" |
-| `SESSION_SECRET` | 시크릿 | 선택 | 쿠키·서명 주소 서명 키 (없으면 APP_PIN 사용) |
+| `SESSION_SECRET` | 시크릿 | 선택 | 쿠키·서명 주소 서명 키. **16자 이상**일 때만 씁니다. 없거나 짧으면 서버가 처음 한 번 무작위 32바이트 키를 만들어 D1 `settings`(`login_session_secret`, `/settings`로는 보이지도 바뀌지도 않음)에 저장해 씁니다. APP_PIN은 더 이상 서명 키로 쓰지 않습니다(이 변경으로 예전 쿠키는 한 번 다시 로그인해야 함). |
 | `SHORTCUT_TOKEN` | 시크릿 | 선택 | iOS 단축어 webhook. 없으면 webhook은 항상 401 |
 | `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | 시크릿 | 선택 | 네이버 쇼핑 검색 API 결과. 없으면 쇼핑몰 검색 링크만 |
 | `REPLICATE_API_TOKEN` | 시크릿 | 선택 | 가상 피팅(Replicate IDM-VTON). 유료 |
@@ -48,7 +51,7 @@
 ### `POST /auth/login`
 - 요청: `{ "pin": "1234" }` (문자열 또는 숫자)
 - 응답 200: `{ "ok": true }` + `Set-Cookie: clothe_session=…`
-- 오류: 401 `"PIN이 맞지 않아요"`, 429 `"PIN을 너무 많이 틀렸어요. N분 뒤에 다시 시도해 주세요."`(15분에 5번), 503 APP_PIN 없음
+- 오류: 401 `"PIN이 맞지 않아요"`, 429 `"PIN을 너무 많이 틀렸어요. N분 뒤에 다시 시도해 주세요."`(15분 창 안에서 6번째 시도부터. 시도 횟수는 PIN 비교 전에 원자적으로 올라가서 동시 요청으로도 우회할 수 없음. 성공하면 초기화), 503 APP_PIN 없음
 
 ### `POST /auth/logout`
 - 응답: `{ "ok": true }` (쿠키 삭제)
@@ -63,7 +66,7 @@
 ### `POST /images`
 - 요청: `multipart/form-data`, 필드 `file` (webp/jpeg/png/heic/heif/gif/avif, 1바이트~8MB)
 - 응답 201: `{ "key": "img/<uuid>.webp" }`
-- 오류: 400 파일 없음/빈 파일/multipart 아님, 413 8MB 초과, 415 형식
+- 오류: 400 파일 없음/빈 파일/multipart 아님, 413 8MB 초과, 415 형식 (파일의 실제 바이트(매직 바이트)로 형식을 확인합니다: 보낸 `type`과 실제 형식이 다르거나 이미지가 아니면 415. HEIC/HEIF/AVIF는 서로 섞여도 허용)
 
 ### `GET /images/{dir}/{name}`
 - 이미지 바이트. 헤더: `Cache-Control: private, max-age=31536000, immutable`, `ETag`. `If-None-Match`가 같으면 `304`(본문 없음).
@@ -129,7 +132,8 @@
 - 응답: `{ name, brand, price, image_url, url, image_key }`
 - 오류: 400 URL, 502 `"페이지를 불러오지 못했어요 (403)"` 등
 
-### `POST /items/wear` (예전 엔드포인트, 계속 지원) → `{ ok: true, log_id: string, duplicate: boolean }`
+### `POST /items/wear` (예전 엔드포인트, 계속 지원) → `WearResult = { ok: true, log_id: string, duplicate: boolean, worn_date: "YYYY-MM-DD", items: Item[] }`
+- `worn_date`, `items`는 추가 필드: 실제로 기록된 날짜(생략 시 서버의 한국 기준 오늘)와 이 기록에 든 옷의 **갱신된** 상태(`wear_count`, `last_worn_date` 포함). 화면은 이 값으로 바로 갱신하면 되고 날짜를 추측할 필요가 없습니다.
 - 요청: `{ item_ids: string[] (1~30), date?: "YYYY-MM-DD" (기본: 한국 오늘), outfit_id?, weather_summary? (≤200) }` + `POST /logs`와 같은 선택 필드
 - 동작은 `POST /logs`와 동일(아래 착용 기록 규칙). 같은 날짜 + 같은 옷 조합이 이미 기록돼 있으면 새로 만들지 않고 `duplicate: true`.
 - 오류: 400 `"입은 옷을 골라 주세요"`, `"옷장에 없는 옷이 들어 있어요…"`, 날짜 형식, `"날짜: 미래 날짜에는 기록할 수 없어요"`(내일까지 허용)
@@ -431,7 +435,7 @@
 ## 16. 프런트엔드 참고
 
 - 기존 화면이 쓰는 엔드포인트·필드는 그대로입니다(필드 추가만 있음). `GET /wishlist`는 이제 `WishlistItemV2`(추가 필드 4개).
-- `POST /items/wear` 응답에 `log_id`, `duplicate`가 추가됐습니다. `duplicate: true`면 "오늘 이미 기록한 코디예요" 정도로 안내하면 됩니다.
+- `POST /items/wear` 응답에 `log_id`, `duplicate`, `worn_date`, `items`(갱신된 옷)가 추가됐습니다. `duplicate: true`면 "오늘 이미 기록한 코디예요" 정도로 안내하면 됩니다.
 - OOTD 기록 화면: `/ootd/analyze` → `suggested_item_ids`를 기본 체크, `pieces[].candidates`로 바꿀 수 있게 → `POST /logs`.
 - 달력: `GET /logs?month=YYYY-MM`. 기록 수정/삭제는 `PATCH`/`DELETE /logs/{id}` (착용 횟수 자동 조정).
 - 퍼스널 컬러: 사진 업로드 → (선택) 캔버스로 화이트밸런스 보정 후 피부/머리/눈 HEX 추출 → `POST /profile/analyze-color { image_key, samples }`.

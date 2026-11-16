@@ -17,15 +17,21 @@ export async function loadImage(env: Env, key: string, maxBytes = 8 * 1024 * 102
   };
 }
 
-/** 이 이미지 key를 쓰는 행이 하나라도 있는지 확인하는 쿼리 (모든 표를 한 번에) */
-const REFERENCED_SQL = `
-SELECT 1 FROM items WHERE image_key = ?1
-UNION ALL SELECT 1 FROM inspirations WHERE image_key = ?1
-UNION ALL SELECT 1 FROM wishlist WHERE image_key = ?1
-UNION ALL SELECT 1 FROM outfit_logs WHERE selfie_key = ?1
-UNION ALL SELECT 1 FROM profile WHERE face_image_key = ?1 OR body_image_key = ?1 OR instr(mannequin_images, ?2) > 0
-UNION ALL SELECT 1 FROM tryons WHERE person_image_key = ?1 OR garment_image_key = ?1 OR result_image_key = ?1
-LIMIT 1`;
+/**
+ * 이 이미지 key를 쓰는 행이 하나라도 있는지 확인하는 쿼리.
+ * UNION ALL(compound SELECT)을 쓰면 D1에서 "too many terms in compound SELECT"로 실패해서(운영 로그에서 확인됨)
+ * 정리가 아예 안 됐다. compound 없이 EXISTS 여러 개를 OR로 묶은 한 줄짜리 SELECT로 바꿨다.
+ * 표가 늘어나도 compound 항 수 제한과 상관없다.
+ */
+export const REFERENCED_SQL = `
+SELECT (
+  EXISTS (SELECT 1 FROM items WHERE image_key = ?1)
+  OR EXISTS (SELECT 1 FROM inspirations WHERE image_key = ?1)
+  OR EXISTS (SELECT 1 FROM wishlist WHERE image_key = ?1)
+  OR EXISTS (SELECT 1 FROM outfit_logs WHERE selfie_key = ?1)
+  OR EXISTS (SELECT 1 FROM profile WHERE face_image_key = ?1 OR body_image_key = ?1 OR instr(mannequin_images, ?2) > 0)
+  OR EXISTS (SELECT 1 FROM tryons WHERE person_image_key = ?1 OR garment_image_key = ?1 OR result_image_key = ?1)
+) AS used`;
 
 /**
  * 행을 지우거나 사진을 바꾼 뒤에 호출: 더 이상 어디에서도 쓰지 않는 이미지만 R2에서 지운다.
@@ -36,8 +42,9 @@ export async function deleteUnreferencedImages(env: Env, keys: (string | null | 
   const unique = [...new Set(keys.filter((k): k is string => typeof k === "string" && k !== ""))];
   if (!unique.length) return [];
   try {
-    const results = await env.DB.batch(unique.map((k) => env.DB.prepare(REFERENCED_SQL).bind(k, JSON.stringify(k))));
-    const orphaned = unique.filter((_, i) => results[i].results.length === 0);
+    const results = await env.DB.batch<{ used: number }>(unique.map((k) => env.DB.prepare(REFERENCED_SQL).bind(k, JSON.stringify(k))));
+    // 결과를 확인하지 못한 key는 지우지 않는다 (확실히 안 쓰는 것만 삭제)
+    const orphaned = unique.filter((_, i) => results[i]?.results?.[0] !== undefined && Number(results[i].results[0].used) === 0);
     if (orphaned.length) await env.BUCKET.delete(orphaned);
     return orphaned;
   } catch (e) {

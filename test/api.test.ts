@@ -220,7 +220,7 @@ describe("착용 기록", () => {
     const first = await post("/items/wear", { item_ids: [a, b], date: "2026-11-10", weather_summary: "맑음" });
     expect(first.body).toMatchObject({ ok: true, duplicate: false });
     const again = await post("/items/wear", { item_ids: [b, a], date: "2026-11-10" });
-    expect(again.body).toEqual({ ok: true, log_id: first.body.log_id, duplicate: true });
+    expect(again.body).toMatchObject({ ok: true, log_id: first.body.log_id, duplicate: true, worn_date: "2026-11-10" });
     expect(wearOf(a)).toEqual({ wear_count: 1, last_worn_date: "2026-11-10" });
     expect(t.db.rows("SELECT id FROM outfit_logs")).toHaveLength(1);
 

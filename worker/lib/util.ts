@@ -250,7 +250,9 @@ export async function readBodyLimited(res: Response, maxBytes: number): Promise<
 
 /** 링크로 저장할 URL 검사: http(s) 이거나 scheme이 없는 글자만 허용 (javascript:, data:, vbscript: 등은 거절) */
 export function isSafeLinkValue(value: string): boolean {
+  // 브라우저는 URL 안의 탭/줄바꿈 등 제어 문자를 지운 뒤 해석한다 ("java\tscript:") → 제어 문자가 있으면 거절
+  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 0x20 || value.charCodeAt(i) === 0x7f) return false;
   const scheme = value.trim().match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
-  if (!scheme) return !/^[\s/\\]*[a-z]+\s*:/i.test(value) && !/[\u0000-\u001f]/.test(value);
+  if (!scheme) return true;
   return scheme === "http" || scheme === "https";
 }

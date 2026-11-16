@@ -76,12 +76,11 @@ function wearStatements(db: D1Database, logId: string, before: LogRef | null, af
       stmts.push(
         db
           .prepare(
-            `UPDATE items SET last_worn_date = (
-               SELECT MAX(d) FROM (
-                 SELECT items.base_last_worn_date AS d
-                 UNION ALL SELECT l.worn_date FROM outfit_logs l, ${LOG_ITEMS} j WHERE j.value = ?1
-               )
-             ) WHERE id = ?1`,
+            // compound SELECT(UNION)은 D1 항 수 제한에 걸릴 수 있어 쓰지 않는다 → 스칼라 max() 두 값 비교 ('' = 없음)
+            `UPDATE items SET last_worn_date = NULLIF(MAX(
+               COALESCE(base_last_worn_date, ''),
+               COALESCE((SELECT MAX(l.worn_date) FROM outfit_logs l, ${LOG_ITEMS} j WHERE j.value = ?1), '')
+             ), '') WHERE id = ?1`,
           )
           .bind(id),
       );

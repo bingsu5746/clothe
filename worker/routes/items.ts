@@ -109,7 +109,11 @@ app.post("/import-url", async (c) => {
  */
 app.post("/wear", async (c) => {
   const { log, duplicate } = await createLog(c.env, toLogInput(readLogFields(await readJson(c))));
-  return c.json({ ok: true, log_id: log.id, duplicate });
+  // 갱신된 옷(wear_count, last_worn_date)을 같이 돌려준다 → 화면이 날짜/횟수를 추측하지 않아도 됨 (추가 필드)
+  const { results } = await c.env.DB.prepare(`SELECT * FROM items WHERE id IN (${log.item_ids.map(() => "?").join(",")})`)
+    .bind(...log.item_ids)
+    .all<Row>();
+  return c.json({ ok: true, log_id: log.id, duplicate, worn_date: log.worn_date, items: results.map(rowToItem) });
 });
 
 app.get("/:id", async (c) => {
