@@ -192,3 +192,8 @@ export async function composeCutout(cutout: Blob, opts: { ratio?: number; paddin
   octx.drawImage(src, left, top, bw, bh, (outW - dw) / 2, (outH - dh) / 2, dw, dh);
   return encode(out, quality, true);
 }
+
+/** 캔버스를 업로드용으로 압축한다 (WebP → 안 되면 투명하면 PNG, 아니면 JPEG) */
+export function encodeCanvas(canvas: HTMLCanvasElement, quality = DEFAULT_QUALITY, mayHaveAlpha = false): Promise<Blob> {
+  return encode(canvas, quality, mayHaveAlpha);
+}

@@ -109,6 +109,17 @@ export async function optimistic<T, R>(path: string, updater: (cur: T | undefine
   }
 }
 
+/**
+ * 조건에 맞는 캐시를 "오래됨"으로 표시한다. 화면에 쓰이는 중이면 바로 새로 받고, 아니면 다음에 열 때 받는다.
+ */
+export function invalidateQueries(match: (path: string) => boolean) {
+  cache.forEach((e, path) => {
+    if (!match(path)) return;
+    e.fetchedAt = 0;
+    if (e.listeners.size > 0) void revalidate(path);
+  });
+}
+
 /** 로그아웃 등: 캐시를 모두 비운다 */
 export function clearQueries() {
   cache.forEach((e) => {

@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { CATEGORIES, CATEGORY_LABEL, SEASONS, SEASON_LABEL, type Item, type ItemTagging, type Season, type UrlImport } from "../../shared/types";
+import { CATEGORIES, CATEGORY_LABEL, SEASONS, SEASON_LABEL, type DormantItem, type Item, type ItemTagging, type Season, type UrlImport } from "../../shared/types";
 import { CameraIcon, ExternalIcon, HangerIcon, ImageIcon, LinkIcon, SparkIcon, TrashIcon, WandIcon } from "../components/icons";
 import { PhotoInput, ITEM_RATIO } from "../components/items";
 import { Button, Chip, ChipRow, Empty, Field, Img, Input, Notice, Page, Segmented, Skeleton, SkeletonText, Spinner, Stat, Switch, Textarea, buttonClass, confirmDialog, toast } from "../components/ui";
 import { api, imageUrl, uploadImage, won } from "../lib/api";
 import { useIsWide, useStoredFlag } from "../lib/hooks";
 import { composeCutout } from "../lib/image";
-import { cpw, patchItemInCache, removeItemFromCache, useItems, wearItems } from "../lib/items";
+import { cpw, patchItemInCache, removeItemFromCache, linkError, useItems, wearItems, wearToast } from "../lib/items";
+import { useQuery } from "../lib/query";
 import { useGoBack, useNav } from "../lib/router";
 
 /** 화면에서 고치는 값 (색·태그는 쉼표로 구분한 글자로 다룬다) */
@@ -199,6 +200,11 @@ function ItemEditor({ id }: { id: string | undefined }) {
   };
 
   const save = async () => {
+    const bad = linkError(form.original_shop_url, "쇼핑몰 링크");
+    if (bad) {
+      setErr(bad);
+      return;
+    }
     setErr(null);
     setSaving(true);
     try {
@@ -235,8 +241,7 @@ function ItemEditor({ id }: { id: string | undefined }) {
 
   const wearToday = async () => {
     try {
-      await wearItems([id!]);
-      toast("오늘 입은 걸로 기록했어요");
+      toast(wearToast(await wearItems([id!])));
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -354,6 +359,7 @@ function ItemEditor({ id }: { id: string | undefined }) {
               <Stat className="px-3.5" label="1회당" value={c != null ? won(c) : "–"} />
               <Stat className="px-3.5" label="마지막" value={source.last_worn_date ? source.last_worn_date.slice(5).replace("-", ".") : "–"} />
             </div>
+            <CpwGauge item={source} />
             <Button variant="primary" block className="mt-3" onClick={wearToday}>
               오늘 입었어요
             </Button>
@@ -461,5 +467,57 @@ function ItemEditor({ id }: { id: string | undefined }) {
         </div>
       </div>
     </Page>
+  );
+}
+
+/** 1회 착용당 가격 목표: 30번 입기 (#30wears) */
+const GOAL_WEARS = 30;
+const MILESTONES = [10, 20, 30];
+
+/** 뽕 뽑기 게이지: 구매 가격을 몇 번 입어서 "뽑았는지" */
+function CpwGauge({ item }: { item: Item }) {
+  const dormant = useQuery<DormantItem[]>("/items/dormant", { staleTime: 5 * 60_000 });
+  const d = dormant.data?.find((x) => x.item_id === item.id);
+  const price = item.purchase_price;
+  if (!price)
+    return <p className="mt-3 rounded-md bg-surface-2 px-3.5 py-3 text-subhead text-muted">구매 가격을 넣으면 1회당 가격과 뽕 뽑기 게이지를 보여 드려요.</p>;
+  const worn = item.wear_count;
+  const ratio = Math.min(1, worn / GOAL_WEARS);
+  const done = worn >= GOAL_WEARS;
+  return (
+    <div className="mt-3 rounded-lg bg-surface px-4 py-4 shadow-[0_0_0_1px_var(--line)]">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="text-headline">뽕 뽑기 게이지</h3>
+        <span className="text-subhead font-semibold tabular">
+          {Math.min(worn, GOAL_WEARS)}/{GOAL_WEARS}회
+        </span>
+      </div>
+      <div
+        className="relative mt-3 h-2.5 rounded-full bg-surface-2"
+        role="meter"
+        aria-label="뽕 뽑기 게이지"
+        aria-valuemin={0}
+        aria-valuemax={GOAL_WEARS}
+        aria-valuenow={Math.min(worn, GOAL_WEARS)}
+        aria-valuetext={`${worn}번 입음, 목표 ${GOAL_WEARS}번`}
+      >
+        <div className="h-full rounded-full bg-accent transition-[width] duration-(--dur-slow) ease-emphasized" style={{ width: `${ratio * 100}%` }} />
+        {MILESTONES.slice(0, -1).map((m) => (
+          <span key={m} aria-hidden className="absolute top-0 h-full w-0.5 bg-bg" style={{ left: `${(m / GOAL_WEARS) * 100}%` }} />
+        ))}
+      </div>
+      <ol className="mt-2 grid grid-cols-3 text-caption text-muted tabular">
+        {MILESTONES.map((m) => (
+          <li key={m} className={`text-right ${worn >= m ? "font-semibold text-ink" : ""}`}>
+            <span className="block">{m}회</span>
+            <span className="block">회당 {won(price / m)}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-3 text-subhead text-ink-2">
+        {done ? `본전 이상 뽑았어요. 지금 회당 ${won(price / Math.max(1, worn))}이에요.` : worn === 0 ? `아직 한 번도 안 입었어요. ${GOAL_WEARS}번 입으면 회당 ${won(price / GOAL_WEARS)}이 돼요.` : `${GOAL_WEARS - worn}번 더 입으면 회당 ${won(price / GOAL_WEARS)}이 돼요.`}
+      </p>
+      {d && <p className="mt-2 rounded-md bg-surface-2 px-3 py-2 text-footnote text-ink-2">장롱템 · {d.reason}. 오늘 탭 추천에 우선으로 섞여요.</p>}
+    </div>
   );
 }

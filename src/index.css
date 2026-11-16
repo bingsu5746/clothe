@@ -404,6 +404,15 @@
     transform: translateY(8px);
   }
 }
+/* 끝을 알 수 없는 진행 막대 (가상 피팅 등) */
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
 @keyframes shimmer {
   from {
     background-position: 200% 0;

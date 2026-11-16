@@ -1,22 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Item, Outfit, SuggestedOutfit, Weather } from "../../shared/types";
-import { CheckIcon, HangerIcon, LayersIcon, PinIcon, PlusIcon, RefreshIcon, SparkIcon } from "../components/icons";
-import { OutfitCollage } from "../components/items";
-import { Button, ButtonLink, Card, Chip, ChipRow, Empty, Input, Notice, Page, Section, Skeleton, SkeletonText, toast } from "../components/ui";
-import { api } from "../lib/api";
-import { createOutfit, useItems, useOutfits, wearItems } from "../lib/items";
+import type { DormantItem, Item, Outfit, SimilarLookResult, SuggestedOutfit, TodayResult, Weather } from "../../shared/types";
+import { CheckIcon, ChevronRightIcon, CloseIcon, HangerIcon, ImageIcon, LayersIcon, PersonIcon, PinIcon, PlusIcon, RefreshIcon, SparkIcon } from "../components/icons";
+import { ItemImage, OutfitCollage, PhotoInput } from "../components/items";
+import { Badge, Button, ButtonLink, Card, Chip, ChipRow, Empty, Field, IconButton, Img, Input, Notice, Page, Section, Segmented, Skeleton, SkeletonText, Textarea, toast } from "../components/ui";
+import { api, uploadImage } from "../lib/api";
+import { createOutfit, useItems, useOutfits, wearItems, wearToast } from "../lib/items";
 import { DEFAULT_LOCATION, type SavedLocation } from "../lib/location";
 import { useQuery } from "../lib/query";
 import { AppLink } from "../lib/router";
 import { loadWeather } from "../lib/weather";
 
 const QUICK = ["출근", "데이트", "많이 걷는 날", "편하게", "꾸안꾸", "격식 있게", "운동"];
-
-interface TodayResult {
-  weather: Weather | null;
-  briefing: string;
-  outfits: SuggestedOutfit[];
-}
 
 /** 기온으로 대략적인 필요한 보온성(1~5) */
 function targetWarmth(w: Weather): number {
@@ -39,6 +33,7 @@ const todayLabel = () => new Intl.DateTimeFormat("ko-KR", { month: "long", day: 
 // 화면을 오가도 날씨와 추천 결과를 다시 받지 않도록 기억해 둔다 (날씨는 20분)
 let weatherMemo: { key: string; at: number; weather: Weather } | null = null;
 let resultMemo: { result: TodayResult; keywords: string } | null = null;
+let similarMemo: { result: SimilarLookResult; mode: SimilarLookResult["mode"]; description: string; photoKey: string | null } | null = null;
 
 export default function Today() {
   const { items, byId, loading: itemsLoading } = useItems();
@@ -111,18 +106,17 @@ export default function Today() {
 
   const wear = async (ids: string[], outfit_id?: string) => {
     try {
-      await wearItems(ids, { outfit_id, weather_summary: weatherSummary });
-      toast("오늘 입은 걸로 기록했어요");
+      toast(wearToast(await wearItems(ids, { outfit_id, weather_summary: weatherSummary })));
     } catch (e) {
       toast.error((e as Error).message);
     }
   };
 
-  const save = async (o: SuggestedOutfit) => {
+  const save = async (o: SuggestedOutfit, tags: string[] = active) => {
     // 버튼은 바로 "저장됨"으로 바뀌고, 실패하면 되돌린다
     setSavedTitles((s) => new Set(s).add(o.title));
     try {
-      await createOutfit({ name: o.title, item_ids: o.item_ids, source: "ai", reason: o.reason, tags: active });
+      await createOutfit({ name: o.title, item_ids: o.item_ids, source: "ai", reason: o.reason, tags });
       toast("코디를 저장했어요");
     } catch (e) {
       setSavedTitles((s) => {
@@ -220,37 +214,30 @@ export default function Today() {
                 </div>
               ) : result ? (
                 <>
-                  {result.briefing && <p className="mb-5 max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2">{result.briefing}</p>}
+                  {result.briefing && <p className="mb-4 max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2">{result.briefing}</p>}
+                  <ProfileUsed used={result.profile_used} />
+                  <DormantStrip dormant={result.dormant} outfits={result.outfits} byId={byId} />
                   {result.outfits.length === 0 ? (
                     <Empty title="어울리는 조합을 찾지 못했어요">옷을 더 등록하거나 상황을 바꿔서 다시 받아 보세요.</Empty>
                   ) : (
                     <div className="grid gap-4 md:grid-cols-2">
-                      {result.outfits.map((o, i) => {
-                        const isSaved = savedTitles.has(o.title);
-                        return (
-                          <Card key={i} className="flex flex-col">
-                            <h3 className="text-headline">{o.title}</h3>
-                            <p className="mt-1 mb-4 text-subhead text-muted">{o.reason}</p>
-                            <div className="mt-auto">
-                              <OutfitCollage ids={o.item_ids} />
-                              <div className="mt-4 flex gap-2">
-                                <Button className="flex-1" icon={isSaved ? <CheckIcon size={18} /> : undefined} disabled={isSaved} onClick={() => save(o)}>
-                                  {isSaved ? "저장됨" : "저장"}
-                                </Button>
-                                <Button variant="primary" className="flex-1" onClick={() => wear(o.item_ids)}>
-                                  오늘 입을래요
-                                </Button>
-                              </div>
-                            </div>
-                          </Card>
-                        );
-                      })}
+                      {result.outfits.map((o, i) => (
+                        <SuggestionCard key={i} outfit={o} saved={savedTitles.has(o.title)} dormant={result.dormant} byId={byId} onSave={() => save(o)} onWear={() => wear(o.item_ids)} />
+                      ))}
                     </div>
                   )}
                 </>
               ) : null}
             </Section>
           )}
+
+          <SimilarLook
+            disabled={notEnough || itemsLoading}
+            context={loc ? { weather, lat: loc.lat, lon: loc.lon, location_name: loc.name } : null}
+            savedTitles={savedTitles}
+            onSave={(o, mode) => save(o, [mode === "couple" ? "커플룩" : "시밀러룩"])}
+            onWear={(ids) => wear(ids)}
+          />
 
           <Section
             title="저장한 코디"
@@ -379,5 +366,224 @@ function WeatherBlock({ weather, error, onRetry }: { weather: Weather | null; er
       </dl>
       {swing >= 10 && <p className="mt-3 text-subhead text-ink-2">일교차가 커요. 벗고 입기 쉬운 겉옷을 챙기세요.</p>}
     </section>
+  );
+}
+
+function ProfileUsed({ used }: { used: boolean }) {
+  if (used)
+    return (
+      <p className="mb-5 flex items-center gap-1.5 text-footnote text-muted">
+        <PersonIcon size={16} /> 내 퍼스널 컬러와 체형을 반영했어요
+      </p>
+    );
+  return (
+    <AppLink to="/profile" className="mb-5 inline-flex items-center gap-1 rounded-sm text-footnote text-muted hover:text-ink">
+      <PersonIcon size={16} /> 퍼스널 컬러·체형 진단을 하면 추천에 반영돼요 <ChevronRightIcon size={14} />
+    </AppLink>
+  );
+}
+
+/** 이번 추천에 "섞어 달라"고 넘긴 장롱템. 실제로 코디에 들어간 것은 표시한다. */
+function DormantStrip({ dormant, outfits, byId }: { dormant: DormantItem[]; outfits: SuggestedOutfit[]; byId: Map<string, Item> }) {
+  const used = new Set(outfits.flatMap((o) => o.item_ids));
+  const list = dormant.filter((d) => byId.has(d.item_id));
+  if (!list.length) return null;
+  return (
+    <div className="mb-6">
+      <h3 className="mb-2 text-subhead font-semibold">장롱템 꺼내 입기</h3>
+      <p className="mb-3 text-footnote text-muted">오래 안 입었거나 1회당 가격이 높은 옷을 코디에 섞어 달라고 했어요.</p>
+      <div className="scroll-x bleed-gutter gap-3 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
+        {list.map((d) => {
+          const it = byId.get(d.item_id)!;
+          const inOutfit = used.has(d.item_id);
+          return (
+            <AppLink key={d.item_id} to={`/closet/${d.item_id}`} className="pressable-soft flex w-[228px] shrink-0 items-center gap-3 rounded-md bg-surface p-2 pr-3 shadow-[0_0_0_1px_var(--line)]">
+              <ItemImage item={it} showName={false} className="w-12 shrink-0 rounded-sm" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-subhead font-medium">{it.name}</span>
+                <span className="block truncate text-caption text-muted">{d.reason}</span>
+                {inOutfit && <span className="mt-0.5 block text-caption font-semibold text-ink">추천 코디에 들어갔어요</span>}
+              </span>
+            </AppLink>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SuggestionCard({ outfit: o, saved, dormant, byId, onSave, onWear }: { outfit: SuggestedOutfit; saved: boolean; dormant?: DormantItem[]; byId: Map<string, Item>; onSave: () => void; onWear: () => void }) {
+  const revived = (dormant ?? []).filter((d) => o.item_ids.includes(d.item_id) && byId.has(d.item_id));
+  return (
+    <Card className="flex flex-col">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="text-headline">{o.title}</h3>
+        {revived.length > 0 && <Badge>장롱템 포함</Badge>}
+      </div>
+      <p className="mt-1 mb-4 text-subhead text-muted">{o.reason}</p>
+      {revived.length > 0 && <p className="-mt-2 mb-4 text-footnote text-ink-2">다시 꺼내 입는 옷: {revived.map((d) => byId.get(d.item_id)?.name).join(", ")}</p>}
+      <div className="mt-auto">
+        <OutfitCollage ids={o.item_ids} />
+        <div className="mt-4 flex gap-2">
+          <Button className="flex-1" icon={saved ? <CheckIcon size={18} /> : undefined} disabled={saved} onClick={onSave}>
+            {saved ? "저장됨" : "저장"}
+          </Button>
+          <Button variant="primary" className="flex-1" onClick={onWear}>
+            오늘 입을래요
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+type SimilarContext = { weather: Weather | null; lat: number; lon: number; location_name: string };
+const MODES = [
+  { value: "similar" as const, label: "시밀러룩" },
+  { value: "couple" as const, label: "커플룩" },
+];
+
+/** 시밀러룩 / 커플룩: 상대가 입을 옷(사진·설명)에 어울리는 내 옷장 코디 */
+function SimilarLook({
+  disabled,
+  context,
+  savedTitles,
+  onSave,
+  onWear,
+}: {
+  disabled: boolean;
+  context: SimilarContext | null;
+  savedTitles: Set<string>;
+  onSave: (o: SuggestedOutfit, mode: SimilarLookResult["mode"]) => void;
+  onWear: (ids: string[]) => void;
+}) {
+  const { byId } = useItems();
+  const [mode, setMode] = useState<SimilarLookResult["mode"]>(similarMemo?.mode ?? "similar");
+  const [description, setDescription] = useState(similarMemo?.description ?? "");
+  const [photo, setPhoto] = useState<{ url: string; key: string | null; blob: Blob | null } | null>(similarMemo?.photoKey ? { url: `/api/images/${similarMemo.photoKey}`, key: similarMemo.photoKey, blob: null } : null);
+  const [result, setResult] = useState<SimilarLookResult | null>(similarMemo?.result ?? null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(
+    () => () => {
+      if (photo?.blob) URL.revokeObjectURL(photo.url);
+    },
+    [photo],
+  );
+
+  const ready = !!photo || description.trim().length > 0;
+
+  const run = async (refresh = false) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      let key = photo?.key ?? null;
+      if (photo && !key && photo.blob) {
+        key = await uploadImage(photo.blob);
+        setPhoto((p) => (p ? { ...p, key } : p));
+      }
+      const r = await api<SimilarLookResult>("/stylist/similar", {
+        method: "POST",
+        json: { mode, partner_image_key: key ?? undefined, partner_description: description.trim() || undefined, ...(context ?? {}), refresh },
+      });
+      similarMemo = { result: r, mode, description, photoKey: key };
+      setResult(r);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title="시밀러룩 · 커플룩" description="같이 만날 사람이 입을 옷을 알려 주면 내 옷장에서 어울리는 코디를 골라 드려요.">
+      <Card>
+        <Segmented label="맞추는 방식" value={mode} onChange={setMode} options={MODES} className="md:max-w-xs" />
+        <p className="mt-2 text-footnote text-muted">{mode === "similar" ? "색감·소재·무드를 비슷하게 맞춰요." : "한 끗 다르게, 같이 섰을 때 잘 어울리게 맞춰요."}</p>
+        <div className="mt-4 flex gap-3">
+          {photo ? (
+            <div className="relative w-24 shrink-0">
+              <Img src={photo.url} ratio="3 / 4" className="rounded-md" alt="상대 옷차림 사진" />
+              <IconButton label="사진 빼기" variant="filled" className="absolute -top-2 -right-2 size-8 shadow-2" onClick={() => setPhoto(null)}>
+                <CloseIcon size={16} />
+              </IconButton>
+            </div>
+          ) : (
+            <PhotoInput
+              label="상대 옷차림 사진 고르기"
+              className="pressable grid w-24 shrink-0 place-items-center rounded-md bg-surface-2 text-muted hover:bg-surface-3"
+              onPick={(b) => setPhoto({ url: URL.createObjectURL(b), key: null, blob: b })}
+            >
+              <span className="flex aspect-[3/4] flex-col items-center justify-center gap-1.5 text-caption">
+                <ImageIcon size={22} />
+                사진
+              </span>
+            </PhotoInput>
+          )}
+          <Field label="상대 옷차림 설명" className="min-w-0 flex-1">
+            <Textarea className="min-h-[7.5rem]" maxLength={500} placeholder="예: 연청 데님 셔츠에 베이지 치노, 흰 스니커즈" value={description} onChange={(e) => setDescription(e.target.value)} />
+          </Field>
+        </div>
+        <div className="mt-4 flex gap-2">
+          <Button variant="outline" className="flex-1" icon={<SparkIcon size={18} />} loading={busy} disabled={!ready || disabled} onClick={() => run(false)}>
+            {busy ? "코디를 맞추는 중" : "어울리는 코디 찾기"}
+          </Button>
+          {result && (
+            <IconButton label="다시 추천받기" variant="filled" className="size-11" disabled={busy} onClick={() => run(true)}>
+              <RefreshIcon size={18} />
+            </IconButton>
+          )}
+        </div>
+        {!ready && !result && <p className="mt-2 text-footnote text-muted">사진이나 설명 중 하나만 있어도 돼요.</p>}
+        {err && (
+          <Notice
+            className="mt-3"
+            title="코디를 맞추지 못했어요"
+            action={
+              <Button size="sm" onClick={() => run(false)}>
+                다시 시도
+              </Button>
+            }
+          >
+            {err}
+          </Notice>
+        )}
+      </Card>
+
+      {busy ? (
+        <div role="status" aria-label="코디를 맞추는 중" className="mt-5 grid gap-4 md:grid-cols-2">
+          {[0, 1].map((i) => (
+            <Card key={i}>
+              <Skeleton className="h-5 w-2/5" />
+              <SkeletonText lines={2} className="mt-3" />
+              <div className="mt-4 grid grid-cols-4 gap-1.5">
+                {[0, 1, 2, 3].map((j) => (
+                  <Skeleton key={j} className="aspect-[3/4]" />
+                ))}
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : result ? (
+        <div className="mt-5">
+          {result.partner_summary && (
+            <p className="mb-5 max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2">
+              <span className="mr-1.5 font-semibold text-ink">{result.mode === "couple" ? "커플룩" : "시밀러룩"}</span>
+              {result.partner_summary}
+            </p>
+          )}
+          {result.outfits.length === 0 ? (
+            <Empty title="어울리는 조합을 찾지 못했어요">설명을 조금 더 자세히 적거나 옷을 더 등록해 보세요.</Empty>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {result.outfits.map((o, i) => (
+                <SuggestionCard key={i} outfit={o} saved={savedTitles.has(o.title)} byId={byId} onSave={() => onSave(o, result.mode)} onWear={() => onWear(o.item_ids)} />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+    </Section>
   );
 }

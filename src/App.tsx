@@ -19,6 +19,13 @@ const loaders = {
   wishlist: () => import("./pages/Wishlist"),
   wishDetail: () => import("./pages/WishDetail"),
   settings: () => import("./pages/Settings"),
+  profile: () => import("./pages/Profile"),
+  colorDiagnosis: () => import("./pages/ColorDiagnosis"),
+  fittingRoom: () => import("./pages/FittingRoom"),
+  ootdCalendar: () => import("./pages/OotdCalendar"),
+  ootdNew: () => import("./pages/OotdNew"),
+  travel: () => import("./pages/Travel"),
+  tripDetail: () => import("./pages/TripDetail"),
   more: () => import("./pages/More"),
 };
 const Today = lazy(loaders.today);
@@ -32,6 +39,13 @@ const Wishlist = lazy(loaders.wishlist);
 const WishDetail = lazy(loaders.wishDetail);
 const Settings = lazy(loaders.settings);
 const More = lazy(loaders.more);
+const Profile = lazy(loaders.profile);
+const ColorDiagnosis = lazy(loaders.colorDiagnosis);
+const FittingRoom = lazy(loaders.fittingRoom);
+const OotdCalendar = lazy(loaders.ootdCalendar);
+const OotdNew = lazy(loaders.ootdNew);
+const Travel = lazy(loaders.travel);
+const TripDetail = lazy(loaders.tripDetail);
 
 let preloaded = false;
 /** 한가할 때 나머지 화면 코드를 미리 받아 둔다 (탭 전환이 바로 되고, 오프라인에서도 열림) */
@@ -58,11 +72,18 @@ function AppRoutes() {
           <Route path=":id" element={<ItemEdit />} />
         </Route>
         <Route path="outfits" element={<Outfits />} />
+        <Route path="outfits/calendar" element={<OotdCalendar />} />
+        <Route path="outfits/ootd" element={<OotdNew />} />
         <Route path="outfits/:id" element={<OutfitDetail />} />
         <Route path="inspo" element={<Inspirations />} />
         <Route path="inspo/:id" element={<InspirationDetail />} />
         <Route path="wishlist" element={<Wishlist />} />
         <Route path="wishlist/:id" element={<WishDetail />} />
+        <Route path="travel" element={<Travel />} />
+        <Route path="travel/:id" element={<TripDetail />} />
+        <Route path="profile" element={<Profile />} />
+        <Route path="profile/color" element={<ColorDiagnosis />} />
+        <Route path="profile/fitting" element={<FittingRoom />} />
         <Route path="settings" element={<Settings />} />
         <Route path="more" element={<More />} />
         <Route path="*" element={<Today />} />

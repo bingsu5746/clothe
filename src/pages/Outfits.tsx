@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Outfit } from "../../shared/types";
 import { LayersIcon, PlusIcon } from "../components/icons";
+import { OutfitsTabs } from "../components/OutfitsTabs";
 import { ItemPicker, OutfitCollage } from "../components/items";
 import { Button, ButtonLink, Card, Empty, IconButton, Notice, Page, Skeleton, promptDialog, toast } from "../components/ui";
 import { createOutfit, useItems, useOutfits } from "../lib/items";
@@ -39,6 +40,7 @@ export default function Outfits() {
         </IconButton>
       }
     >
+      <OutfitsTabs value="saved" />
       {loading ? (
         <div className={GRID} role="status" aria-label="불러오는 중">
           {[0, 1, 2, 3].map((i) => (

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CATEGORY_LABEL, type WishlistItem } from "../../shared/types";
+import { CATEGORY_LABEL, type WishlistItemV2 as WishlistItem } from "../../shared/types";
 import { HeartIcon, ImageIcon, LinkIcon, PlusIcon } from "../components/icons";
 import { PhotoInput } from "../components/items";
 import { Button, Empty, Eyebrow, Field, IconButton, Img, Input, Notice, Page, Segmented, Sheet, Skeleton, buttonClass } from "../components/ui";
@@ -122,6 +122,12 @@ export default function Wishlist() {
                 <div className="mt-0.5 line-clamp-2 text-callout font-medium group-hover:underline">{w.name}</div>
                 <div className="mt-1 text-subhead text-muted tabular">{w.estimated_price != null ? won(w.estimated_price) : "가격 미정"}</div>
               </div>
+              {w.validator_score != null && (
+                <span className="shrink-0 text-right" aria-label={`살까 말까 ${w.validator_score}점${w.validation?.stale ? ", 다시 판독 권장" : ""}`}>
+                  <span className="block text-headline tabular">{w.validator_score}</span>
+                  <span className="block text-caption text-muted">{w.validation?.stale ? "다시 판독" : (w.validation?.label ?? "점")}</span>
+                </span>
+              )}
             </AppLink>
           ))}
         </div>

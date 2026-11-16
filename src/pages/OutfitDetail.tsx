@@ -5,7 +5,7 @@ import { LayersIcon, PencilIcon, TrashIcon } from "../components/icons";
 import { ItemImage, ItemPicker } from "../components/items";
 import { Button, Empty, Eyebrow, IconButton, Notice, Page, SkeletonGrid, confirmDialog, promptDialog, toast } from "../components/ui";
 import { api } from "../lib/api";
-import { OUTFITS_PATH, useItems, useOutfits, wearItems } from "../lib/items";
+import { OUTFITS_PATH, useItems, useOutfits, wearItems, wearToast } from "../lib/items";
 import { mutateQuery, optimistic } from "../lib/query";
 import { AppLink, useGoBack } from "../lib/router";
 
@@ -80,8 +80,7 @@ export default function OutfitDetail() {
 
   const wear = async () => {
     try {
-      await wearItems(outfit.item_ids, { outfit_id: outfit.id });
-      toast("오늘 입은 걸로 기록했어요");
+      toast(wearToast(await wearItems(outfit.item_ids, { outfit_id: outfit.id })));
     } catch (e) {
       toast.error((e as Error).message);
     }

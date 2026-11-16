@@ -1,6 +1,6 @@
 # 내 옷장 디자인 시스템
 
-새 화면(프로필·진단, 여행, OOTD 캘린더, 가상 피팅)을 만들 때 이 문서의 토큰·컴포넌트·패턴만으로 조립하면 기존 화면과 같은 결이 나옵니다.
+새 화면을 만들 때 이 문서의 토큰·컴포넌트·패턴만으로 조립하면 기존 화면과 같은 결이 나옵니다.
 토큰은 `src/index.css`, 컴포넌트는 `src/components/`(한 번에 `import … from "../components/ui"`), 내비게이션은 `src/nav.ts` 에 있습니다.
 
 ## 1. 원칙
@@ -158,6 +158,27 @@ toast("위시리스트에 추가했어요", { action: { label: "보기", onClick
 | `PhotoInput` | 사진 고르기/찍기(`capture`). 방향 보정·축소·압축된 Blob 을 `onPick` 으로 |
 | `ITEM_RATIO` | `"3 / 4"` |
 
+### 2차 화면에서 추가한 것
+
+| 컴포넌트 | 위치 | 메모 |
+|---|---|---|
+| `Rating` | `components/Rating.tsx` (첫 화면 번들에 안 들어가도록 ui.tsx 에서 내보내지 않음) | 별점 1~5 고르기(radiogroup, 좌우 화살표, 같은 별을 다시 누르면 지움). 별 하나가 44px |
+| `Stars` | `components/Rating.tsx` | 읽기 전용 별점 (`role="img"`, "4점") |
+| `TagEditor` | `components/Rating.tsx` | 자주 쓰는 태그 칩 + 직접 입력(Enter/쉼표). OOTD 상황 태그 |
+| `OutfitsTabs` | `components/OutfitsTabs.tsx` | 코디 화면 "저장한 코디 \| OOTD 캘린더" 세그먼트(경로 `/outfits` ↔ `/outfits/calendar`, replace 이동) |
+| `TripForm` | `components/TripForm.tsx` | 여행 만들기/고치기 시트 (날짜 검사 21일, 메모 칩) |
+| `CollageBoard` | `components/CollageBoard.tsx` | 2D 콜라주 보드. 피팅룸에서만 쓰여 그 화면 조각에 같이 묶임 |
+
+데이터 도우미: `lib/profile.ts`(`useProfile`, `setProfile`, `patchProfile`), `lib/logs.ts`(`monthPath`, `applyLog`, `removeLog`, `dayLabel`), `lib/trips.ts`(`setTrip`, `dday`, `nightsLabel`), `lib/color.ts`(화이트밸런스·색 뽑기), `query.ts` 의 `invalidateQueries(match)`(보고 있는 화면이면 바로, 아니면 다음에 열 때 새로 받음). `wearItems()` 는 서버의 `WearResult` 로 옷 캐시를 맞추고 달력·장롱템 캐시를 무효화하며, 토스트 문구는 `wearToast(result)`(같은 날 같은 조합이면 "이미 기록돼 있어요").
+
+패턴 메모:
+- **사진 위에서 위치 고르기**(퍼스널 컬러 색 뽑기): 사진 상자에 `role="application"` + `tabIndex=0`, 누르면 그 자리, 화살표 키로 1%(Shift 5%) 이동. 표시는 흰 테두리 + 어두운 바깥선 원 + 이름표(어떤 사진 위에서도 보이게).
+- **끌어 놓는 보드**(콜라주): 보드 하나가 pointer 이벤트를 받고 `touch-action: none`. 각 조각은 `<button>` 이라 Tab 으로 고르고 화살표·+/-·[ ]·R·Delete 로 다룬다. 같은 동작을 아래 도구 막대와 레이어 목록(위·아래·빼기 IconButton)으로도 할 수 있게 둔다.
+- **달력**: `role="grid"`, 칸은 roving tabindex(포커스된 칸만 0). 화살표로 하루/일주일, PageUp/PageDown 으로 달, Home/End. 기록 있는 날은 셀카(없으면 첫 옷 사진)를 3:4 칸에 채우고 날짜는 위 그라데이션 위에.
+- **AI 점수의 근거**(살까 말까): 큰 점수 링 + 항목별 `점수 / 만점` 막대 + 계산식 한 줄. 프로필이 없어 빠진 항목은 "점수에서 제외" 꼬리표와 프로필로 가는 링크.
+- **오래 걸리는 외부 작업**(가상 피팅): 2.5초 폴링, 경과 시간 + 끝을 모르는 막대(`animate-[indeterminate_…]`, 동작 줄이기면 멈춘 막대), "화면을 떠나도 계속돼요" 안내, 다시 들어오면 진행 중인 작업을 이어서 보여 줌.
+- **예보처럼 없을 수 있는 값**: 없는 날은 "예보 없음"으로 쓰고 숫자를 만들지 않는다.
+
 ### 아이콘
 
 `icons.tsx` 의 선 아이콘(24 격자, 굵기 1.6). `<PlusIcon size={20} />`. 새 아이콘은 같은 파일에 `make(<path … />)` 로 추가합니다. 이모지를 아이콘으로 쓰지 않습니다.
@@ -174,7 +195,7 @@ toast("위시리스트에 추가했어요", { action: { label: "보기", onClick
 | 768–1099 (iPad 세로) | 왼쪽 아이콘 레일(84px) |
 | ≥ 1100 (iPad 가로, Mac) | 왼쪽 사이드바(248px) |
 
-**목적지는 `src/nav.ts` 한 곳에서 정합니다.** 여행·프로필은 이미 들어 있고 `enabled: false` 입니다. 새 화면을 붙이려면 ① `src/pages/` 에 화면 작성 ② `src/App.tsx` 의 `loaders` 에 `() => import(...)`, `lazy(...)` 상수, `<Route>` 를 추가 ③ `nav.ts` 에서 `enabled: true`. 모바일에서는 `mobile: "more"` 항목이 "더보기" 화면(`/more`)에 자동으로 나타납니다. 탭은 4개까지만 `mobile: "tab"` 으로 두세요.
+**목적지는 `src/nav.ts` 한 곳에서 정합니다.** 새 화면을 붙이려면 ① `src/pages/` 에 화면 작성 ② `src/App.tsx` 의 `loaders` 에 `() => import(...)`, `lazy(...)` 상수, `<Route>` 를 추가 ③ `nav.ts` 에서 `enabled: true`. 모바일에서는 `mobile: "more"` 항목이 "더보기" 화면(`/more`)에 자동으로 나타납니다. 탭은 4개까지만 `mobile: "tab"` 으로 두세요.
 
 ### 화면 하나
 

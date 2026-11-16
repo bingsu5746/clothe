@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import type { Item, Outfit } from "../../shared/types";
+import type { Item, Outfit, WearResult } from "../../shared/types";
 import { api } from "./api";
-import { mutateQuery, optimistic, peekQuery, revalidate, useQuery } from "./query";
+import { invalidateQueries, mutateQuery, optimistic, peekQuery, revalidate, useQuery } from "./query";
 
 export const ITEMS_PATH = "/items";
 export const OUTFITS_PATH = "/outfits";
@@ -73,18 +73,39 @@ export function removeItemFromCache(id: string) {
   mutateQuery<Item[]>(ITEMS_PATH, (cur) => cur?.filter((i) => i.id !== id));
 }
 
+/** 서버가 돌려준 갱신된 옷들로 캐시를 고친다 (착용 기록 뒤 등) */
+export function patchItemsInCache(updated: Item[]) {
+  if (!updated.length) return;
+  const m = new Map(updated.map((i) => [i.id, i]));
+  mutateQuery<Item[]>(ITEMS_PATH, (cur) => cur?.map((i) => m.get(i.id) ?? i));
+}
+
+/** 착용 기록이 바뀌었을 때: 달력·장롱템 캐시를 다시 받게 한다 */
+export function invalidateWearCaches() {
+  invalidateQueries((path) => path.startsWith("/logs") || path === "/items/dormant");
+}
+
 /**
  * 착용 기록 (+1). 화면의 착용 횟수는 바로 올라가고, 실패하면 되돌린다.
+ * 성공하면 서버가 돌려준 실제 값(wear_count, last_worn_date)으로 맞춘다.
+ * duplicate 면 같은 날 같은 조합이 이미 기록돼 있어서 횟수는 그대로다.
  */
-export async function wearItems(itemIds: string[], extra: { outfit_id?: string; weather_summary?: string } = {}): Promise<void> {
+export async function wearItems(itemIds: string[], extra: { outfit_id?: string; weather_summary?: string } = {}): Promise<WearResult> {
   const ids = new Set(itemIds);
-  const today = todayKST();
-  await optimistic<Item[], unknown>(
+  const result = await optimistic<Item[], WearResult>(
     ITEMS_PATH,
-    (cur) => cur?.map((i) => (ids.has(i.id) ? { ...i, wear_count: i.wear_count + 1, last_worn_date: !i.last_worn_date || i.last_worn_date < today ? today : i.last_worn_date } : i)),
-    () => api("/items/wear", { method: "POST", json: { item_ids: [...ids], ...extra } }),
+    (cur) => cur?.map((i) => (ids.has(i.id) ? { ...i, wear_count: i.wear_count + 1 } : i)),
+    () => api<WearResult>("/items/wear", { method: "POST", json: { item_ids: [...ids], ...extra } }),
     false,
   );
+  patchItemsInCache(result.items ?? []);
+  invalidateWearCaches();
+  return result;
+}
+
+/** 착용 기록 결과를 짧게 알린다 */
+export function wearToast(r: WearResult) {
+  return r.duplicate ? "그날 같은 조합이 이미 기록돼 있어요" : "오늘 입은 걸로 기록했어요";
 }
 
 /**
@@ -116,4 +137,12 @@ export async function createOutfit(body: { name: string; item_ids: string[]; sou
 export function cpw(item: Pick<Item, "purchase_price" | "wear_count">): number | null {
   if (!item.purchase_price) return null;
   return item.purchase_price / Math.max(1, item.wear_count);
+}
+
+/** 링크 칸 검사: 비어 있거나 http(s) 주소면 null, 아니면 한국어 오류 */
+export function linkError(v: string, label = "링크"): string | null {
+  const t = v.trim();
+  if (!t) return null;
+  if (/^https?:\/\/[^\s]+$/i.test(t)) return null;
+  return `${label}: http(s)로 시작하는 주소만 넣을 수 있어요`;
 }

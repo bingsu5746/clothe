@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { ChevronDownIcon, CopyIcon, LogoutIcon, MoonIcon, PhoneIcon, PinIcon, RefreshIcon, ShareIcon } from "../components/icons";
-import { Button, IconButton, Input, ListGroup, ListRow, Notice, Page, Segmented, confirmDialog, toast } from "../components/ui";
+import type { TryOnAvailability } from "../../shared/types";
+import { ChevronDownIcon, CopyIcon, LogoutIcon, MoonIcon, PhoneIcon, PinIcon, RefreshIcon, SearchIcon, ShareIcon, ShirtIcon } from "../components/icons";
+import { Badge, Button, IconButton, Input, ListGroup, ListRow, Notice, Page, Segmented, Skeleton, confirmDialog, toast } from "../components/ui";
 import { api } from "../lib/api";
 import { DEFAULT_LOCATION, currentPosition, saveLocation, type SavedLocation } from "../lib/location";
 import { useIsWide } from "../lib/hooks";
@@ -145,8 +146,11 @@ export default function Settings() {
               <ChevronDownIcon size={16} className="text-faint transition-transform duration-(--dur-base) group-open:rotate-180" />
             </summary>
             <div className="space-y-4 px-4 pt-1 pb-5 text-subhead">
-              <p className="text-muted">iOS는 웹앱을 공유 목록에 직접 넣을 수 없어서 단축어를 거쳐요. 사진·인스타·핀터레스트 링크는 스크랩으로, 쇼핑몰 링크는 위시리스트로 저장돼요.</p>
+              <p className="text-muted">iOS는 웹앱을 공유 목록에 직접 넣을 수 없어서 단축어를 거쳐요. 사진과 인스타·핀터레스트 링크는 스크랩으로, 그 밖의 쇼핑몰 링크는 위시리스트로 저장돼요.</p>
               <ol className="list-decimal space-y-3 pl-5 marker:font-semibold marker:text-muted">
+                <li>
+                  Cloudflare 대시보드 → Workers → clothe → Settings → Variables and Secrets 에 시크릿 <Code>SHORTCUT_TOKEN</Code>(아무 긴 문자열)을 넣어요. 없으면 단축어 저장은 항상 거절돼요.
+                </li>
                 <li>
                   단축어 앱 → 새 단축어 → 이름 옆 ⓘ → <b>공유 시트에서 보기</b>를 켜고, 받는 유형은 이미지와 URL.
                 </li>
@@ -169,24 +173,30 @@ export default function Settings() {
                   <ul className="mt-2 list-disc space-y-1.5 pl-5 text-muted">
                     <li>방법: POST</li>
                     <li>
-                      헤더: <Code>X-Shortcut-Token</Code> = Cloudflare에 넣어 둔 SHORTCUT_TOKEN 값
+                      헤더: <Code>X-Shortcut-Token</Code> = 위에서 넣은 SHORTCUT_TOKEN 값
                     </li>
                     <li>
-                      요청 본문: 양식 → 사진이면 <Code>file</Code>(파일), 링크면 <Code>url</Code>(텍스트)에 단축어 입력
+                      요청 본문: <b>양식</b> → 사진이면 <Code>file</Code>(파일), 링크면 <Code>url</Code>(텍스트)에 단축어 입력을 넣어요
                     </li>
                     <li>
-                      (선택) <Code>target</Code> = <Code>inspiration</Code>(스크랩) 또는 <Code>wishlist</Code>
+                      (선택) <Code>target</Code> = <Code>inspiration</Code>(스크랩) 또는 <Code>wishlist</Code>, <Code>note</Code> = 메모
+                    </li>
+                    <li>
+                      양식 대신 <b>JSON</b>(<Code>{"{ url, target, note }"}</Code>)이나 사진 파일 그대로, 링크가 든 텍스트 그대로 보내도 돼요.
                     </li>
                   </ul>
                 </li>
                 <li>
-                  동작 추가: <b>사전 값 가져오기</b>(키 <Code>message</Code>) → <b>알림 보기</b>
+                  동작 추가: <b>사전 값 가져오기</b>(키 <Code>message</Code>) → <b>알림 보기</b>. 저장되면 &ldquo;스크랩에 저장했어요&rdquo; 같은 안내가 떠요.
                 </li>
               </ol>
+              <p className="text-footnote text-muted">토큰이 틀리면 401, 사진·링크가 없으면 400, 링크에서 사진을 못 가져오면 422로 돌아와요. 사설 IP·localhost 주소는 받지 않아요.</p>
             </div>
           </details>
           <ListRow icon={<PhoneIcon size={22} />} title="홈 화면에 추가" subtitle="Safari 공유 버튼 → 홈 화면에 추가를 누르면 주소창 없이 앱처럼 열려요." />
         </ListGroup>
+
+        <Connections />
 
         <ListGroup title="앱">
           <ListRow icon={<RefreshIcon size={22} />} title="최신 버전으로 다시 불러오기" onClick={() => window.location.reload()} />
@@ -194,5 +204,59 @@ export default function Settings() {
         </ListGroup>
       </div>
     </Page>
+  );
+}
+
+/** 선택 기능(유료·외부 키)이 켜져 있는지 서버에 물어본다 */
+function Connections() {
+  const tryon = useQuery<TryOnAvailability>("/tryon/status", { staleTime: 10 * 60_000 });
+  const shop = useQuery<{ naver_enabled: boolean }>("/shopping/status", { staleTime: 10 * 60_000 });
+  const state = (loading: boolean, error: string | null, on: boolean | undefined, onLabel: string) =>
+    loading ? <Skeleton className="h-6 w-14 rounded-full" /> : error && on === undefined ? <Badge tone="danger">확인 실패</Badge> : on ? <Badge tone="solid">{onLabel}</Badge> : <Badge>꺼짐</Badge>;
+  return (
+    <ListGroup title="연결 상태" footer="AI 기능(Gemini)은 GEMINI_API_KEY 시크릿이 있어야 해요. 키가 없거나 한도를 넘으면 각 화면에서 이유를 알려 드려요.">
+      <details className="group">
+        <summary className="flex min-h-13 items-center gap-3 px-4 hover:bg-surface-2">
+          <span className="grid size-7 place-items-center text-ink-2">
+            <ShirtIcon size={22} />
+          </span>
+          <span className="min-w-0 flex-1 py-3">
+            <span className="block text-body">AI 가상 피팅</span>
+            <span className="mt-0.5 block text-footnote text-muted">
+              {tryon.data?.available ? `${tryon.data.provider === "replicate" ? "Replicate" : "Gemini"} · ${tryon.data.model}` : (tryon.data?.reason ?? "선택 기능 (유료)")}
+            </span>
+          </span>
+          {state(tryon.loading, tryon.error, tryon.data?.available, "켜짐")}
+          <ChevronDownIcon size={16} className="text-faint transition-transform duration-(--dur-base) group-open:rotate-180" />
+        </summary>
+        <div className="px-4 pt-1 pb-4 text-subhead text-muted">
+          {tryon.error && !tryon.data ? tryon.error : tryon.data?.available ? "피팅룸에서 전신 사진에 옷을 입혀 볼 수 있어요. 결과마다 외부 서비스 비용이 들어요." : (tryon.data?.setup_hint ?? "")}
+        </div>
+      </details>
+      <details className="group">
+        <summary className="flex min-h-13 items-center gap-3 px-4 hover:bg-surface-2">
+          <span className="grid size-7 place-items-center text-ink-2">
+            <SearchIcon size={22} />
+          </span>
+          <span className="min-w-0 flex-1 py-3">
+            <span className="block text-body">네이버 쇼핑 검색</span>
+            <span className="mt-0.5 block text-footnote text-muted">{shop.data?.naver_enabled ? "위시리스트에서 비슷한 상품과 가격을 찾아요" : "꺼져 있으면 쇼핑몰 검색 링크만 보여 드려요"}</span>
+          </span>
+          {state(shop.loading, shop.error, shop.data?.naver_enabled, "켜짐")}
+          <ChevronDownIcon size={16} className="text-faint transition-transform duration-(--dur-base) group-open:rotate-180" />
+        </summary>
+        <div className="px-4 pt-1 pb-4 text-subhead text-muted">
+          {shop.error && !shop.data ? (
+            shop.error
+          ) : shop.data?.naver_enabled ? (
+            "네이버 쇼핑 검색 API가 연결돼 있어요 (하루 25,000회 무료)."
+          ) : (
+            <>
+              네이버 개발자 센터에서 검색 API 애플리케이션을 만들고, Cloudflare 시크릿 <Code>NAVER_CLIENT_ID</Code>, <Code>NAVER_CLIENT_SECRET</Code>을 넣으면 켜져요. 무료예요.
+            </>
+          )}
+        </div>
+      </details>
+    </ListGroup>
   );
 }

@@ -1,20 +1,16 @@
 import { useState } from "react";
 import { useParams } from "react-router";
-import { CATEGORIES, CATEGORY_LABEL, type SuggestedOutfit, type WishlistItem } from "../../shared/types";
-import { ChevronRightIcon, ExternalIcon, HeartIcon, RefreshIcon, SparkIcon, TrashIcon } from "../components/icons";
-import { ItemImage, ITEM_RATIO, OutfitCollage } from "../components/items";
-import { Button, Card, Chip, ChipRow, Empty, Field, IconButton, Img, Input, Notice, Page, Section, Skeleton, SkeletonText, buttonClass, confirmDialog, promptDialog, toast } from "../components/ui";
+import { CATEGORIES, CATEGORY_LABEL, type WishlistItemV2 } from "../../shared/types";
+import { ChevronRightIcon, ExternalIcon, HeartIcon, TrashIcon } from "../components/icons";
+import { ITEM_RATIO } from "../components/items";
+import { Button, Chip, ChipRow, Empty, Field, IconButton, Img, Input, Notice, Page, Skeleton, SkeletonText, buttonClass, confirmDialog, promptDialog, toast } from "../components/ui";
 import { api, imageUrl, won } from "../lib/api";
-import { ITEMS_PATH, useItems } from "../lib/items";
+import { ITEMS_PATH, linkError } from "../lib/items";
 import { mutateQuery, revalidate, useQuery } from "../lib/query";
 import { AppLink, useGoBack, useNav } from "../lib/router";
+import { ShoppingLinks, Validator } from "./wish/WishInsights";
 
-interface Combos {
-  verdict: string;
-  similar_item_ids: string[];
-  outfits: SuggestedOutfit[];
-}
-
+type WishlistItem = WishlistItemV2;
 const WISH_PATH = "/wishlist";
 const STATUS_LABEL: Record<WishlistItem["status"], string> = { wanted: "사고 싶어요", bought: "샀어요", dropped: "관심 없음" };
 
@@ -26,13 +22,10 @@ export default function WishDetail() {
 function WishDetailView({ id }: { id: string }) {
   const nav = useNav();
   const goBack = useGoBack();
-  const { byId } = useItems();
   const list = useQuery<WishlistItem[]>(WISH_PATH);
   const w = list.data?.find((x) => x.id === id) ?? null;
-  const [combos, setCombos] = useState<Combos | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [aiErr, setAiErr] = useState<string | null>(null);
 
   if (!w)
     return (
@@ -65,18 +58,6 @@ function WishDetailView({ id }: { id: string }) {
     } catch (e) {
       setLocal(before);
       setErr((e as Error).message);
-    }
-  };
-
-  const loadCombos = async (force = false) => {
-    setBusy("combos");
-    setAiErr(null);
-    try {
-      setCombos(await api<Combos>(`/wishlist/${w.id}/combos${force ? "?force=true" : ""}`, { method: "POST" }));
-    } catch (e) {
-      setAiErr((e as Error).message);
-    } finally {
-      setBusy(null);
     }
   };
 
@@ -116,13 +97,6 @@ function WishDetailView({ id }: { id: string }) {
       toast.error((e as Error).message);
     }
   };
-
-  const newTile = (
-    <div className="relative">
-      <Img src={img} ratio={ITEM_RATIO} className="rounded-sm shadow-[0_0_0_1.5px_var(--ink)]" fallback={<HeartIcon size={18} className="text-faint" />} />
-      <span className="absolute top-1 left-1 rounded-full bg-accent px-1.5 py-0.5 text-[10px] leading-none font-bold text-accent-ink">새 옷</span>
-    </div>
-  );
 
   return (
     <Page
@@ -194,78 +168,20 @@ function WishDetailView({ id }: { id: string }) {
                 />
               </Field>
               <Field label="쇼핑몰 링크">
-                <Input key={w.shop_url ?? ""} defaultValue={w.shop_url ?? ""} inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="https://" onBlur={(e) => e.target.value !== (w.shop_url ?? "") && patch({ shop_url: e.target.value })} />
+                <Input key={w.shop_url ?? ""} defaultValue={w.shop_url ?? ""} inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="https://" onBlur={(e) => {
+                    if (e.target.value === (w.shop_url ?? "")) return;
+                    const bad = linkError(e.target.value, "쇼핑몰 링크");
+                    if (bad) setErr(bad);
+                    else void patch({ shop_url: e.target.value });
+                  }} />
               </Field>
             </div>
             <p className="text-footnote text-faint">고친 내용은 칸을 벗어나면 바로 저장돼요.</p>
             <Notice>{err}</Notice>
           </section>
 
-          <Section title="이걸 사면 만들 수 있는 코디" description="지금 내 옷장의 옷과 어떻게 어울리는지 AI가 확인해 줘요.">
-            {busy === "combos" ? (
-              <div role="status" aria-label="조합을 확인하는 중" className="space-y-4">
-                <SkeletonText lines={2} />
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {[0, 1].map((i) => (
-                    <Card key={i}>
-                      <Skeleton className="h-5 w-1/2" />
-                      <div className="mt-3 grid grid-cols-4 gap-1.5">
-                        {[0, 1, 2, 3].map((j) => (
-                          <Skeleton key={j} className="aspect-[3/4]" />
-                        ))}
-                      </div>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-            ) : !combos ? (
-              <>
-                {aiErr && (
-                  <Notice className="mb-3" title="조합을 확인하지 못했어요">
-                    {aiErr}
-                  </Notice>
-                )}
-                <Button variant={aiErr ? "secondary" : "primary"} icon={<SparkIcon size={18} />} onClick={() => loadCombos()}>
-                  {aiErr ? "다시 시도" : "조합 확인하기"}
-                </Button>
-              </>
-            ) : (
-              <div className="space-y-5">
-                {aiErr && <Notice title="다시 확인하지 못했어요">{aiErr}</Notice>}
-                <p className="max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2">{combos.verdict}</p>
-                {combos.similar_item_ids.some((sid) => byId.has(sid)) && (
-                  <div>
-                    <h3 className="mb-2 text-subhead font-semibold">옷장에 이미 비슷한 옷이 있어요</h3>
-                    <div className="scroll-x gap-2.5">
-                      {combos.similar_item_ids
-                        .filter((sid) => byId.has(sid))
-                        .map((sid) => (
-                          <AppLink key={sid} to={`/closet/${sid}`} className="pressable-soft w-[72px] shrink-0 rounded-sm">
-                            <ItemImage item={byId.get(sid)} showName={false} className="rounded-sm" />
-                            <div className="mt-1 truncate text-caption text-muted">{byId.get(sid)?.name}</div>
-                          </AppLink>
-                        ))}
-                    </div>
-                  </div>
-                )}
-                <div>
-                  <h3 className="mb-2 text-subhead font-semibold">새로 만들 수 있는 코디 {combos.outfits.length}개</h3>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {combos.outfits.map((o, i) => (
-                      <Card key={i}>
-                        <div className="text-headline">{o.title}</div>
-                        <p className="mt-1 mb-3 text-subhead text-muted">{o.reason}</p>
-                        <OutfitCollage ids={o.item_ids.filter((x) => x !== "NEW")} extra={newTile} />
-                      </Card>
-                    ))}
-                  </div>
-                </div>
-                <Button icon={<RefreshIcon size={18} />} onClick={() => loadCombos(true)}>
-                  다시 확인
-                </Button>
-              </div>
-            )}
-          </Section>
+          <Validator wish={w} image={img} onUpdate={setLocal} />
+          <ShoppingLinks wish={w} onUpdate={setLocal} />
 
           <div className="flex flex-wrap gap-2 md:max-w-md">
             {w.status === "wanted" ? (
