@@ -147,7 +147,7 @@ async function resolveGarment(env: Env, b: Record<string, unknown>): Promise<Gar
 async function replicateImageRef(env: Env, origin: string, key: string): Promise<string> {
   const img = await loadImage(env, key, TRYON_IMAGE_MAX_BYTES);
   if (img.data.length <= DATA_URL_MAX_BYTES || !origin.startsWith("https://") || !isPublicHttpUrl(origin)) return dataUrl(img);
-  return `${origin}${await signedImagePath(sessionSecret(env), key)}`;
+  return `${origin}${await signedImagePath(await sessionSecret(env), key)}`;
 }
 
 /**

@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { CATEGORIES, type Category } from "../../shared/types";
-import { HttpError, isDateString, isPublicHttpUrl } from "./util";
+import { HttpError, isDateString, isPublicHttpUrl, isSafeLinkValue } from "./util";
 
 /**
  * 요청 본문 검증 도우미.
@@ -148,6 +148,17 @@ export function optUrl(o: Body, key: string, label = key): string | null | undef
   const v = optStr(o, key, 2000, label);
   if (v == null) return v;
   if (!isPublicHttpUrl(v)) throw new HttpError(400, "올바른 URL을 입력해 주세요");
+  return v;
+}
+
+/**
+ * 화면에 링크(<a href>, <img src>)로 그대로 쓰이는 URL 필드. http(s)나 scheme 없는 글자만 받는다.
+ * javascript:/data: 같은 값은 400 (저장된 XSS 방지). 서버가 불러오지 않으므로 사설 주소 검사는 하지 않는다.
+ */
+export function optLink(o: Body, key: string, max = 2000, label = key): string | null | undefined {
+  const v = optStr(o, key, max, label);
+  if (v == null) return v;
+  if (!isSafeLinkValue(v)) throw bad(label, "http(s) 링크만 넣을 수 있어요");
   return v;
 }
 

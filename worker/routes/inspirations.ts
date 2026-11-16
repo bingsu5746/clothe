@@ -6,7 +6,7 @@ import { geminiJson, INSPIRATION_SCHEMA, loadImage } from "../lib/gemini";
 import { deleteUnreferencedImages } from "../lib/images";
 import { inspirationPrompt } from "../lib/stylist";
 import { HttpError, newId } from "../lib/util";
-import { optImageKey, optStr, paramId, readJson } from "../lib/validate";
+import { optImageKey, optLink, optStr, paramId, readJson } from "../lib/validate";
 
 const app = new Hono<AppEnv>();
 
@@ -29,7 +29,7 @@ app.post("/", async (c) => {
   if (!image_key) throw new HttpError(400, "사진이 필요해요");
   const id = newId();
   await c.env.DB.prepare("INSERT INTO inspirations (id, image_key, source_url, note) VALUES (?, ?, ?, ?)")
-    .bind(id, image_key, optStr(b, "source_url", 2000, "출처 링크") ?? null, optStr(b, "note", 500, "메모") ?? null)
+    .bind(id, image_key, optLink(b, "source_url", 2000, "출처 링크") ?? null, optStr(b, "note", 500, "메모") ?? null)
     .run();
   return c.json(await getInspiration(c.env.DB, id), 201);
 });
@@ -39,7 +39,7 @@ app.patch("/:id", async (c) => {
   const b = await readJson(c);
   // 예전 동작 유지: 보낸 값만 바꾸고, null/빈 값은 "바꾸지 않음"으로 본다
   await c.env.DB.prepare("UPDATE inspirations SET note = COALESCE(?, note), source_url = COALESCE(?, source_url) WHERE id = ?")
-    .bind(optStr(b, "note", 500, "메모") ?? null, optStr(b, "source_url", 2000, "출처 링크") ?? null, id)
+    .bind(optStr(b, "note", 500, "메모") ?? null, optLink(b, "source_url", 2000, "출처 링크") ?? null, id)
     .run();
   return c.json(await getInspiration(c.env.DB, id));
 });

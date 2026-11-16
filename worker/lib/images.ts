@@ -45,3 +45,34 @@ export async function deleteUnreferencedImages(env: Env, keys: (string | null | 
     return [];
   }
 }
+
+/**
+ * 파일 앞부분(매직 바이트)으로 이미지 형식을 알아낸다. 모르는 형식이면 null.
+ * HEIC/HEIF/AVIF는 모두 ISO BMFF("....ftyp" + 브랜드)라서 브랜드로 구분하고, 구분이 애매하면 "isobmff".
+ * 형식 출처: JPEG FF D8 FF / PNG 89 50 4E 47 0D 0A 1A 0A / GIF "GIF87a"|"GIF89a" / WebP "RIFF"....“WEBP” /
+ * ISO BMFF 4~7번째 바이트 "ftyp" (https://mimesniff.spec.whatwg.org/#matching-an-image-type-pattern)
+ */
+export type SniffedImage = "image/jpeg" | "image/png" | "image/gif" | "image/webp" | "image/avif" | "image/heic" | "isobmff";
+
+export function sniffImageType(b: Uint8Array): SniffedImage | null {
+  const ascii = (from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.length >= 8 && b[0] === 0x89 && ascii(1, 4) === "PNG" && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return "image/png";
+  if (b.length >= 6 && (ascii(0, 6) === "GIF87a" || ascii(0, 6) === "GIF89a")) return "image/gif";
+  if (b.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  if (b.length >= 12 && ascii(4, 8) === "ftyp") {
+    const brand = ascii(8, 12);
+    if (brand === "avif" || brand === "avis") return "image/avif";
+    if (["heic", "heix", "hevc", "hevx", "heim", "heis"].includes(brand)) return "image/heic";
+    if (["mif1", "msf1"].includes(brand)) return "isobmff";
+  }
+  return null;
+}
+
+/** 주장한 MIME과 실제 형식이 같은 계열인지 (HEIC/HEIF/AVIF는 브랜드가 섞여 쓰여서 서로 허용) */
+export function sameImageFamily(claimed: string, sniffed: SniffedImage): boolean {
+  const c = claimed.toLowerCase();
+  const bmff = new Set(["image/heic", "image/heif", "image/avif"]);
+  if (sniffed === "isobmff" || sniffed === "image/heic" || sniffed === "image/avif") return bmff.has(c);
+  return c === sniffed;
+}

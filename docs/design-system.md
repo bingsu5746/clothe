@@ -174,7 +174,7 @@ toast("위시리스트에 추가했어요", { action: { label: "보기", onClick
 | 768–1099 (iPad 세로) | 왼쪽 아이콘 레일(84px) |
 | ≥ 1100 (iPad 가로, Mac) | 왼쪽 사이드바(248px) |
 
-**목적지는 `src/nav.ts` 한 곳에서 정합니다.** 여행·프로필은 이미 들어 있고 `enabled: false` 입니다. 새 화면을 붙이려면 ① `src/pages/` 에 화면 작성 ② `src/App.tsx` 의 `pages` 와 `routes` 에 추가 ③ `nav.ts` 에서 `enabled: true`. 모바일에서는 `mobile: "more"` 항목이 "더보기" 화면(`/more`)에 자동으로 나타납니다. 탭은 4개까지만 `mobile: "tab"` 으로 두세요.
+**목적지는 `src/nav.ts` 한 곳에서 정합니다.** 여행·프로필은 이미 들어 있고 `enabled: false` 입니다. 새 화면을 붙이려면 ① `src/pages/` 에 화면 작성 ② `src/App.tsx` 의 `loaders` 에 `() => import(...)`, `lazy(...)` 상수, `<Route>` 를 추가 ③ `nav.ts` 에서 `enabled: true`. 모바일에서는 `mobile: "more"` 항목이 "더보기" 화면(`/more`)에 자동으로 나타납니다. 탭은 4개까지만 `mobile: "tab"` 으로 두세요.
 
 ### 화면 하나
 
@@ -218,8 +218,8 @@ export default function Travel() {
 
 - **데이터**: `useQuery<T>("/경로")`(`src/lib/query.ts`). 화면을 오가도 캐시를 바로 보여 주고 30초가 지났으면 뒤에서 새로 받습니다. 목록 화면은 `loading`(스켈레톤) → `error && !data`(Notice + 다시 시도) → 빈 상태(Empty + action) → 내용 순서로 그립니다. 고친 뒤에는 `mutateQuery(path, updater)` 로 캐시를 직접 고치고, 값싼 동작은 `optimistic(path, updater, action)`.
 - **옷·코디**: `useItems()`, `useOutfits()`, `wearItems(ids)`(착용 +1, 낙관적), `createOutfit(body)`(낙관적), `patchItemInCache`, `removeItemFromCache` (`src/lib/items.tsx`).
-- **이동**: `react-router` 의 `Link`/`useNavigate` 대신 `AppLink` / `AppNavLink` / `useNav()` / `useGoBack()`(`src/lib/router.tsx`). View Transition 이 자동으로 걸립니다 — 모바일에서 깊이 들어가면 오른쪽에서 밀려 들어오고, 돌아오면 반대, 같은 깊이(탭)는 크로스페이드. 지원하지 않는 브라우저는 새 화면이 살짝 떠오르는 대체 애니메이션.
-- **사진 업로드**: `PhotoInput` → (`compressImage`: EXIF 방향 보정, 최대 1280px, WebP / 안 되면 JPEG·PNG) → `uploadImage(blob)`. 배경 제거가 필요하면 `removeBackground`(`src/lib/background.ts`, 동적 import) → `composeCutout`(3:4 로 다듬기).
+- **이동**: `react-router` 의 `Link`/`useNavigate` 대신 `AppLink` / `AppNavLink` / `useNav()` / `useGoBack()`(`src/lib/router.tsx`). 라우터는 선언형 `BrowserRouter` 입니다(데이터 라우터 `createBrowserRouter` 는 번들이 약 20kB(gzip) 커서 쓰지 않음). 스크롤 복원은 `Layout` 의 `<NavigationEffects />` 가 하고, 이동해도 스크롤을 유지하려면 `AppLink preventScrollReset` / `nav(to, { preventScrollReset: true })`. View Transition 이 자동으로 걸립니다 — 모바일에서 깊이 들어가면 오른쪽에서 밀려 들어오고, 돌아오면 반대, 같은 깊이(탭)는 크로스페이드. 지원하지 않는 브라우저는 새 화면이 살짝 떠오르는 대체 애니메이션.
+- **사진 업로드**: `PhotoInput` → (`compressImage`: EXIF 방향 보정, 최대 1280px, WebP / 안 되면 JPEG·PNG) → `uploadImage(blob)`. 배경 제거가 필요하면 `removeBackground(blob, onProgress)`(`src/lib/background.ts`) → `composeCutout`(3:4 로 다듬기). 라이브러리 코드는 처음 쓸 때 버전 고정 jsDelivr ESM 에서, 모델·WASM 은 staticimgly.com 에서 받습니다(npm 번들 시 24MB WASM 이 배포물에 복사되는 문제 때문). 실패하면 반드시 원본 사진으로 계속 진행하고 `Notice tone="info"` 로 알립니다. 가상 피팅의 마네킹 누끼에도 그대로 쓸 수 있습니다.
 - **당겨서 새로고침**과 앱 복귀 시 새로고침은 `Layout`/`lib/pwa.ts` 가 `revalidateAll()` 로 처리하므로 `useQuery` 만 쓰면 자동으로 따라옵니다.
 
 ## 6. 접근성 점검표
@@ -229,3 +229,14 @@ export default function Travel() {
 - 키보드 포커스 링은 전역(`:focus-visible`, 2px 잉크). 지우지 마세요.
 - 본문 글자는 `ink`/`ink-2`/`muted` 만(대비 AA). `faint` 는 placeholder·장식 전용.
 - 진행 상태에는 `role="status"`, 오류에는 `Notice`(=`role="alert"`).
+
+## 7. 화면 상태 문구 (예시)
+
+| 상황 | 패턴 |
+|---|---|
+| AI 키 없음·AI 실패 | `<Notice title="AI 분석을 하지 못했어요" action={<Button size="sm">다시 시도</Button>}>{서버 메시지}</Notice>` — 서버가 준 한국어 오류를 그대로 보여 주고, 직접 입력할 수 있는 길을 함께 안내 |
+| 목록 불러오기 실패 | `Notice` + "다시 시도" (`reload`) |
+| 빈 목록 | `Empty` + 주 행동 버튼 하나 ("첫 옷 등록하기", "코디 만들기") |
+| 필터 결과 없음 | `Empty` + "필터 지우기" |
+| 없는 주소 | `Empty title="…을 찾을 수 없어요"` + 목록으로 돌아가는 버튼 |
+| 삭제 | `confirmDialog({ destructive: true })` → 성공 `toast("삭제했어요")` |

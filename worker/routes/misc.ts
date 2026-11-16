@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
 import { HttpError, parseJsonUnknown } from "../lib/util";
+import { sameImageFamily, sniffImageType } from "../lib/images";
 import { isImageKey } from "../lib/validate";
 
 const app = new Hono<AppEnv>();
@@ -12,9 +13,15 @@ export async function storeUpload(bucket: R2Bucket, file: File): Promise<string>
   if (!ALLOWED_TYPES.has(file.type)) throw new HttpError(415, "지원하지 않는 이미지 형식이에요");
   if (file.size === 0) throw new HttpError(400, "빈 파일이에요");
   if (file.size > MAX_IMAGE_BYTES) throw new HttpError(413, "이미지가 너무 커요 (최대 8MB)");
-  const ext = file.type.split("/")[1];
+  const data = new Uint8Array(await file.arrayBuffer());
+  // 보낸 쪽이 주장하는 형식(file.type)을 믿지 않고 파일 앞부분(매직 바이트)으로 실제 형식을 확인한다.
+  // (HTML/SVG/스크립트를 image/png라고 속여 올려서 R2에 저장하고 같은 origin에서 내려주는 것을 막는다)
+  const sniffed = sniffImageType(data);
+  if (!sniffed || !sameImageFamily(file.type, sniffed)) throw new HttpError(415, "이미지 파일이 아니거나 형식이 맞지 않아요");
+  const type = sniffed === "isobmff" ? file.type : sniffed;
+  const ext = type.split("/")[1];
   const key = `img/${crypto.randomUUID()}.${ext}`;
-  await bucket.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type } });
+  await bucket.put(key, data, { httpMetadata: { contentType: type } });
   return key;
 }
 
@@ -40,6 +47,8 @@ export async function serveImage(bucket: R2Bucket, key: string, request: Request
   headers.set("content-type", obj.httpMetadata?.contentType ?? "application/octet-stream");
   headers.set("content-length", String(obj.size));
   headers.set("x-content-type-options", "nosniff");
+  // 주소창에서 직접 열어도 스크립트가 돌지 않게 (이미지가 아닌 내용이 섞여 들어와도 안전)
+  headers.set("content-security-policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
   return new Response(obj.body, { headers });
 }
 

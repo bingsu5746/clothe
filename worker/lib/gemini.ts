@@ -9,6 +9,13 @@ export type Schema = Record<string, unknown>;
 const GEMINI_TIMEOUT_MS = 45000;
 /** Gemini에 한 번에 보내는 이미지 한 장의 최대 크기 */
 export const GEMINI_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
+/**
+ * 요청 하나에 넣는 이미지 원본 바이트 합계 상한.
+ * 문서(https://ai.google.dev/gemini-api/docs/image-understanding, 2026-11-16 확인):
+ * "Inline image data limits your total request size (text prompts, system instructions, and inline bytes) to 20MB."
+ * base64는 4/3배로 커지므로 원본 13MB → 약 17.3MB + 프롬프트 여유.
+ */
+export const GEMINI_INLINE_TOTAL_MAX_BYTES = 13 * 1024 * 1024;
 
 const BLOCK_FINISH_REASONS = new Set(["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT"]);
 
@@ -84,6 +91,8 @@ export function requireGeminiKey(env: Env): string {
  */
 export async function geminiJson(env: Env, prompt: string, schema: Schema, images: GeminiImage[] = [], temperature = 0.7): Promise<unknown> {
   const key = requireGeminiKey(env);
+  const total = images.reduce((n, img) => n + img.data.byteLength, 0);
+  if (total > GEMINI_INLINE_TOTAL_MAX_BYTES) throw new HttpError(413, "사진이 너무 커서 AI에 보낼 수 없어요. 더 작은 사진으로 다시 시도해 주세요.");
   const model = env.GEMINI_MODEL || "gemini-flash-latest";
   const res = await fetchWithRetry(
     geminiUrl(model),

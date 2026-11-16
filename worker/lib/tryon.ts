@@ -1,8 +1,8 @@
 import type { Env } from "../env";
 import type { Category, TryOn, TryOnAvailability } from "../../shared/types";
 import { strOrNull, type Row } from "./db";
-import type { LoadedImage } from "./images";
-import { fetchWithRetry, fromBase64, HttpError, toBase64 } from "./util";
+import { sniffImageType, type LoadedImage } from "./images";
+import { fetchWithRetry, fromBase64, HttpError, readBodyLimited, toBase64 } from "./util";
 import { asCategory, asEnum, asString, isRecord } from "./validate";
 
 /**
@@ -145,14 +145,40 @@ export async function replicateGet(env: Env, id: string): Promise<ReplicatePredi
   return p;
 }
 
-/** Replicate 결과 파일 내려받기 (문서: 결과 파일을 받을 때도 Authorization 헤더가 필요) */
+/**
+ * Replicate 결과 파일 호스트인지.
+ * 문서(https://replicate.com/docs/topics/predictions/output-files, 2026-11-16 확인):
+ * "Output files are served by `replicate.delivery` and its subdomains."
+ */
+export function isReplicateFileUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const h = u.hostname.toLowerCase();
+    return u.protocol === "https:" && (h === "replicate.delivery" || h.endsWith(".replicate.delivery"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Replicate 결과 파일 내려받기.
+ * prediction의 output은 모델이 내놓는 값이라(TRYON_MODEL로 다른 모델을 쓸 수도 있다) 아무 주소나 될 수 있다.
+ * Replicate 파일 호스트가 아니면 받지 않는다 → API 토큰이 다른 서버로 새거나 내부 주소를 부르는 일을 막는다.
+ * 리다이렉트도 따라가지 않는다.
+ */
 export async function replicateDownload(env: Env, url: string): Promise<LoadedImage> {
-  const res = await fetchWithRetry(url, { headers: { authorization: `Bearer ${env.REPLICATE_API_TOKEN}` } }, { timeoutMs: 30000, retries: 1, label: "Replicate" });
+  if (!isReplicateFileUrl(url)) throw new HttpError(502, "가상 피팅 결과 주소가 Replicate 파일 주소가 아니에요.");
+  const res = await fetchWithRetry(
+    url,
+    { headers: { authorization: `Bearer ${env.REPLICATE_API_TOKEN}` }, redirect: "manual" },
+    { timeoutMs: 30000, retries: 1, label: "Replicate" },
+  );
   if (!res.ok) throw new HttpError(502, `가상 피팅 결과 이미지를 받지 못했어요 (${res.status})`);
-  const type = (res.headers.get("content-type") ?? "").split(";")[0];
-  const data = new Uint8Array(await res.arrayBuffer());
-  if (!data.length || data.length > 20 * 1024 * 1024) throw new HttpError(502, "가상 피팅 결과 이미지가 올바르지 않아요.");
-  return { mimeType: type.startsWith("image/") ? type : "image/png", data };
+  const data = await readBodyLimited(res, 20 * 1024 * 1024);
+  if (!data || !data.length) throw new HttpError(502, "가상 피팅 결과 이미지가 올바르지 않아요.");
+  const sniffed = sniffImageType(data);
+  if (!sniffed) throw new HttpError(502, "가상 피팅 결과가 이미지가 아니에요.");
+  return { mimeType: sniffed === "isobmff" ? "image/heif" : sniffed, data };
 }
 
 export function dataUrl(img: LoadedImage): string {

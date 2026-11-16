@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
-import { Outlet, ScrollRestoration, useLocation } from "react-router";
+import { Suspense, useEffect, useRef } from "react";
+import { Outlet, useLocation } from "react-router";
+import { PageFallback, RouteErrorBoundary } from "./RouteBoundary";
 import { revalidateAll } from "../lib/query";
-import { AppLink } from "../lib/router";
+import { AppLink, NavigationEffects } from "../lib/router";
 import { MORE_PATH, enabledNav, isNavActive, moreNav, tabNav, type NavItem } from "../nav";
 import { HangerIcon, MoreIcon, RefreshIcon } from "./icons";
 
@@ -18,11 +19,15 @@ export default function Layout() {
     <div className="min-h-dvh">
       <Sidebar pathname={pathname} />
       <main className="pr-safe pl-safe md:pl-[calc(var(--nav-w)+var(--safe-left))]">
-        <Outlet />
+        <RouteErrorBoundary resetKey={pathname}>
+          <Suspense fallback={<PageFallback />}>
+            <Outlet />
+          </Suspense>
+        </RouteErrorBoundary>
       </main>
       <TabBar pathname={pathname} />
       <PullToRefresh />
-      <ScrollRestoration />
+      <NavigationEffects />
     </div>
   );
 }

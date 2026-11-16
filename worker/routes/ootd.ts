@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
 import type { Item, OotdAnalysis, OotdPiece } from "../../shared/types";
 import { cacheGet, cachePut, getAllItems, wardrobeSignature } from "../lib/db";
-import { geminiJson, loadImage, type GeminiImage } from "../lib/gemini";
+import { GEMINI_INLINE_TOTAL_MAX_BYTES, geminiJson, loadImage, type GeminiImage } from "../lib/gemini";
 import { loadImage as loadR2Image } from "../lib/images";
 import { applyVerification, OOTD_SCHEMA, OOTD_VERIFY_SCHEMA, ootdPrompt, ootdVerifyPrompt, pickVerifyTargets, sanitizeOotd, suggestedItemIds } from "../lib/ootd";
 import { HttpError, sha256Hex } from "../lib/util";
@@ -30,8 +30,17 @@ async function verifyWithImages(env: Env, selfie: GeminiImage, pieces: OotdPiece
         return key ? loadR2Image(env, key, VERIFY_IMAGE_MAX_BYTES).catch(() => null) : null;
       }),
     );
-    const okIds = ids.filter((_, i) => loaded[i] !== null);
-    const images = loaded.filter((x): x is GeminiImage => x !== null);
+    // 셀카 + 후보 사진의 합이 Gemini 요청 한도(20MB, base64 포함)를 넘지 않게 앞에서부터 담는다
+    let budget = GEMINI_INLINE_TOTAL_MAX_BYTES - selfie.data.byteLength;
+    const okIds: string[] = [];
+    const images: GeminiImage[] = [];
+    ids.forEach((id, i) => {
+      const img = loaded[i];
+      if (!img || img.data.byteLength > budget) return;
+      budget -= img.data.byteLength;
+      okIds.push(id);
+      images.push(img);
+    });
     const usable = targets.map((t) => ({ ...t, item_ids: t.item_ids.filter((id) => okIds.includes(id)) })).filter((t) => t.item_ids.length >= 2);
     if (!usable.length) return { pieces, verified: false };
     const raw = await geminiJson(env, ootdVerifyPrompt(pieces, usable, okIds), OOTD_VERIFY_SCHEMA, [selfie, ...images], 0.1);

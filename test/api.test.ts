@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../worker/index";
 import { resetSchemaCache } from "../worker/lib/schema";
-import { geminiReply, makeEnv, sessionCookie, type TestEnv } from "./helpers/env";
+import { geminiReply, makeEnv, sessionCookie, TEST_SECRET, type TestEnv } from "./helpers/env";
 
 /**
  * 라우트 통합 테스트: 실제 Hono 앱 + 메모리 SQLite(D1 흉내) + 메모리 R2. 외부 API(fetch)는 전부 가짜.
@@ -38,6 +38,18 @@ async function addItem(over: Json = {}): Promise<string> {
   const r = await post("/items", { name: "흰 셔츠", category: "top", ...over });
   expect(r.status).toBe(201);
   return r.body.id;
+}
+
+/** 형식별 실제 파일 머리(매직 바이트) + 채움 */
+const MAGIC: Record<string, number[]> = {
+  webp: [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50],
+  png: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  jpeg: [0xff, 0xd8, 0xff, 0xe0],
+};
+function imageBytes(kind: keyof typeof MAGIC, size = 32): Uint8Array {
+  const out = new Uint8Array(Math.max(size, MAGIC[kind].length)).fill(7);
+  out.set(MAGIC[kind]);
+  return out;
 }
 
 function putImage(key: string, bytes = 100, type = "image/webp") {
@@ -315,7 +327,7 @@ describe("이미지 제공", () => {
       form.append("file", file);
       return app.request("http://localhost/api/images", { method: "POST", body: form, headers: { cookie } }, t.env);
     };
-    const ok = await send(new File([new Uint8Array(10)], "a.webp", { type: "image/webp" }));
+    const ok = await send(new File([imageBytes("webp")], "a.webp", { type: "image/webp" }));
     expect(ok.status).toBe(201);
     const { key } = (await ok.json()) as { key: string };
     expect(key).toMatch(/^img\/[0-9a-f-]+\.webp$/);
@@ -325,10 +337,40 @@ describe("이미지 제공", () => {
     expect((await post("/images", { file: "x" })).status).toBe(400);
   });
 
+  it("업로드: 주장한 형식을 믿지 않고 매직 바이트로 확인한다 (HTML을 image/png로 위장 불가)", async () => {
+    const send = (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return app.request("http://localhost/api/images", { method: "POST", body: form, headers: { cookie } }, t.env);
+    };
+    expect((await send(new File(["<html><script>alert(1)</script></html>"], "a.png", { type: "image/png" }))).status).toBe(415);
+    expect((await send(new File([new Uint8Array(10)], "a.webp", { type: "image/webp" }))).status).toBe(415);
+    // PNG 바이트를 webp라고 보내면 거절 (형식 불일치)
+    expect((await send(new File([imageBytes("png")], "a.webp", { type: "image/webp" }))).status).toBe(415);
+    const jpg = await send(new File([imageBytes("jpeg")], "a.jpg", { type: "image/jpeg" }));
+    expect(jpg.status).toBe(201);
+    expect(t.bucket.objects.size).toBe(1);
+  });
+
+  it("이미지 응답에는 nosniff + sandbox CSP, API 응답에는 no-store와 보안 헤더", async () => {
+    await putImage("img/a.webp");
+    const img = await get("/images/img/a.webp");
+    expect(img.res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(img.res.headers.get("content-security-policy")).toContain("sandbox");
+    expect(img.res.headers.get("cache-control")).toContain("immutable");
+    const api = await get("/items");
+    expect(api.res.headers.get("cache-control")).toBe("no-store");
+    expect(api.res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(api.res.headers.get("referrer-policy")).toBe("no-referrer");
+    const err = await get("/nope");
+    expect(err.status).toBe(404);
+    expect(err.res.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("서명 주소는 로그인 없이 열리고, 서명이 틀리면 403", async () => {
     await putImage("img/a.webp");
     const { signedImagePath } = await import("../worker/lib/auth");
-    const path = await signedImagePath("test-secret", "img/a.webp");
+    const path = await signedImagePath(TEST_SECRET, "img/a.webp");
     cookie = "";
     const ok = await app.request(`http://localhost${path}`, {}, t.env);
     expect(ok.status).toBe(200);
@@ -792,7 +834,7 @@ describe("가상 피팅", () => {
     route({
       "api.replicate.com/v1/predictions/pred1": () => Response.json(++polls === 1 ? { id: "pred1", status: "processing", output: null } : { id: "pred1", status: "succeeded", output: "https://replicate.delivery/out/result.png" }),
       "api.replicate.com/v1/predictions": () => Response.json({ id: "pred1", status: "starting", output: null, error: null }, { status: 201 }),
-      "replicate.delivery": () => new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "content-type": "image/png" } }),
+      "replicate.delivery": () => new Response(imageBytes("png", 40), { headers: { "content-type": "image/png" } }),
     });
     expect((await get("/tryon/status")).body).toMatchObject({ available: true, provider: "replicate" });
 
@@ -810,7 +852,7 @@ describe("가상 피팅", () => {
     expect((await get(`/tryon/${start.body.id}`)).body.status).toBe("processing");
     const done = await get(`/tryon/${start.body.id}`);
     expect(done.body).toMatchObject({ status: "succeeded", result_image_key: `tryon/${start.body.id}.png`, error: null });
-    expect(t.bucket.objects.get(`tryon/${start.body.id}.png`)?.data.length).toBe(4);
+    expect(t.bucket.objects.get(`tryon/${start.body.id}.png`)?.data.length).toBe(40);
     const download = fetchMock.mock.calls.find(([u]) => String(u).includes("replicate.delivery"))!;
     expect(download[1]?.headers).toMatchObject({ authorization: "Bearer r8_token" });
     expect((await get(`/images/tryon/${start.body.id}.png`)).status).toBe(200);
@@ -912,7 +954,7 @@ describe("스크랩 / 단축어", () => {
     cookie = "";
     const send = (headers: Record<string, string>, body: BodyInit) => app.request("http://localhost/api/webhook/shortcut", { method: "POST", headers, body }, t.env);
     expect((await send({ "content-type": "application/json" }, "{}")).status).toBe(401);
-    const ok = await send({ "x-shortcut-token": "shortcut-token", "content-type": "image/jpeg" }, new Uint8Array(20));
+    const ok = await send({ "x-shortcut-token": "shortcut-token", "content-type": "image/jpeg" }, imageBytes("jpeg", 20));
     expect(await ok.json()).toMatchObject({ ok: true, type: "inspiration" });
     expect((await send({ "x-shortcut-token": "shortcut-token", "content-type": "application/json" }, JSON.stringify({ url: "http://127.0.0.1/x" }))).status).toBe(400);
     expect((await send({ "x-shortcut-token": "shortcut-token", "content-type": "application/json" }, "[]")).status).toBe(400);

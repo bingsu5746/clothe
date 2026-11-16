@@ -11,12 +11,18 @@ export function setUnauthorizedHandler(fn: () => void) {
 
 export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
   const { json, ...rest } = init;
-  const res = await fetch(`/api${path}`, {
-    ...rest,
-    credentials: "same-origin",
-    headers: json !== undefined ? { "content-type": "application/json", ...rest.headers } : rest.headers,
-    body: json !== undefined ? JSON.stringify(json) : rest.body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      ...rest,
+      credentials: "same-origin",
+      headers: json !== undefined ? { "content-type": "application/json", ...rest.headers } : rest.headers,
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+    });
+  } catch {
+    // 네트워크 자체가 끊긴 경우 (브라우저 기본 메시지는 영어라서 바꿔 준다)
+    throw new ApiError(0, navigator.onLine === false ? "인터넷에 연결되어 있지 않아요. 연결되면 다시 시도해 주세요." : "서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.");
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith("/auth/login")) onUnauthorized?.();

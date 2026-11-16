@@ -1,9 +1,9 @@
 import type { Env } from "../env";
 import type { OutfitLog } from "../../shared/types";
-import { jsonStrings, numOrNull, rowToLog, strOrNull, type Row } from "./db";
+import { rowToLog, type Row } from "./db";
 import { deleteUnreferencedImages } from "./images";
 import { HttpError, newId } from "./util";
-import { computeWearChanges, sameItemSet, type ItemWear, type LogRef, type WearChange } from "./wear";
+import { sameItemSet, type LogRef } from "./wear";
 
 export interface LogInput {
   worn_date: string;
@@ -20,37 +20,74 @@ export type LogPatch = Partial<LogInput>;
 
 const placeholders = (n: number) => Array.from({ length: n }, () => "?").join(",");
 
-/** 주어진 옷이 들어 있는 다른 기록들 (excludeId 제외). item_ids JSON이 깨진 행은 무시한다. */
-async function logsWithItems(db: D1Database, itemIds: string[], excludeId: string | null): Promise<LogRef[]> {
-  if (!itemIds.length) return [];
-  const { results } = await db
-    .prepare(
-      `SELECT l.worn_date, l.item_ids FROM outfit_logs l
-       WHERE l.id != ? AND EXISTS (
-         SELECT 1 FROM json_each(CASE WHEN json_valid(l.item_ids) THEN l.item_ids ELSE '[]' END) j WHERE j.value IN (${placeholders(itemIds.length)})
-       )`,
-    )
-    .bind(excludeId ?? "", ...itemIds)
-    .all<Row>();
-  return results.map((r) => ({ worn_date: String(r.worn_date), item_ids: jsonStrings(r.item_ids) }));
-}
+/** item_ids JSON이 깨진 행은 빈 배열로 본다 */
+const LOG_ITEMS = "json_each(CASE WHEN json_valid(l.item_ids) THEN l.item_ids ELSE '[]' END)";
 
-async function itemWear(db: D1Database, itemIds: string[]): Promise<ItemWear[]> {
-  if (!itemIds.length) return [];
+/** 옷장에 실제로 있는 id만 */
+async function existingItemIds(db: D1Database, itemIds: string[]): Promise<Set<string>> {
+  if (!itemIds.length) return new Set();
   const { results } = await db
-    .prepare(`SELECT id, wear_count, last_worn_date, base_last_worn_date FROM items WHERE id IN (${placeholders(itemIds.length)})`)
+    .prepare(`SELECT id FROM items WHERE id IN (${placeholders(itemIds.length)})`)
     .bind(...itemIds)
-    .all<Row>();
-  return results.map((r) => ({
-    id: String(r.id),
-    wear_count: numOrNull(r.wear_count) ?? 0,
-    last_worn_date: strOrNull(r.last_worn_date),
-    base_last_worn_date: strOrNull(r.base_last_worn_date),
-  }));
+    .all<{ id: string }>();
+  return new Set(results.map((r) => String(r.id)));
 }
 
-function wearStatements(db: D1Database, changes: WearChange[]): D1PreparedStatement[] {
-  return changes.map((ch) => db.prepare("UPDATE items SET wear_count = ?, last_worn_date = ? WHERE id = ?").bind(ch.wear_count, ch.last_worn_date, ch.id));
+/**
+ * 기록 하나가 before → after로 바뀐 "뒤에" 실행할 착용 횟수/마지막 착용일 갱신 문장 (규칙: worker/lib/wear.ts).
+ *
+ * 예전에는 Worker가 옷의 wear_count와 다른 기록을 먼저 읽고 새 값을 계산해서 절대값으로 덮어썼다.
+ * 그러면 서로 다른 기록 두 개를 동시에 저장할 때(더블 탭, 단축어 + 앱) 둘 다 같은 옛 값을 읽어서 +1이 한 번만 남는
+ * lost update가 생겼다. 이제는 판단과 갱신을 모두 SQL 안에서 하고, 기록 변경과 같은 batch(트랜잭션)로 실행한다.
+ * D1은 batch를 직렬로 실행하므로 동시에 와도 순서대로 정확히 반영된다.
+ * - 빠진 (옷, 날짜): 그 날짜에 그 옷이 든 기록이 더 이상 없을 때만 -1 (0 아래로 안 내려감)
+ * - 들어온 (옷, 날짜): 이 기록 말고는 그 날짜에 그 옷이 든 기록이 없을 때만 +1
+ * - last_worn_date = max(base_last_worn_date, 그 옷이 든 모든 기록의 날짜)
+ */
+function wearStatements(db: D1Database, logId: string, before: LogRef | null, after: LogRef | null): D1PreparedStatement[] {
+  const beforeIds = new Set(before?.item_ids ?? []);
+  const afterIds = new Set(after?.item_ids ?? []);
+  const stmts: D1PreparedStatement[] = [];
+  for (const id of new Set([...beforeIds, ...afterIds])) {
+    const had = beforeIds.has(id);
+    const has = afterIds.has(id);
+    const sameDay = had && has && before!.worn_date === after!.worn_date;
+    if (had && !sameDay) {
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE items SET wear_count = MAX(0, wear_count - 1) WHERE id = ?1 AND NOT EXISTS (
+               SELECT 1 FROM outfit_logs l, ${LOG_ITEMS} j WHERE l.worn_date = ?2 AND j.value = ?1)`,
+          )
+          .bind(id, before!.worn_date),
+      );
+    }
+    if (has && !sameDay) {
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE items SET wear_count = wear_count + 1 WHERE id = ?1 AND NOT EXISTS (
+               SELECT 1 FROM outfit_logs l, ${LOG_ITEMS} j WHERE l.worn_date = ?2 AND j.value = ?1 AND l.id != ?3)`,
+          )
+          .bind(id, after!.worn_date, logId),
+      );
+    }
+    if (!sameDay) {
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE items SET last_worn_date = (
+               SELECT MAX(d) FROM (
+                 SELECT items.base_last_worn_date AS d
+                 UNION ALL SELECT l.worn_date FROM outfit_logs l, ${LOG_ITEMS} j WHERE j.value = ?1
+               )
+             ) WHERE id = ?1`,
+          )
+          .bind(id),
+      );
+    }
+  }
+  return stmts;
 }
 
 async function getLogRow(db: D1Database, id: string): Promise<OutfitLog> {
@@ -70,12 +107,8 @@ export async function createLog(env: Env, input: LogInput): Promise<{ log: Outfi
   const ids = [...new Set(input.item_ids)];
   if (!ids.length) throw new HttpError(400, "입은 옷을 골라 주세요");
 
-  const [sameDay, items, others] = await Promise.all([
-    db.prepare("SELECT * FROM outfit_logs WHERE worn_date = ?").bind(input.worn_date).all<Row>(),
-    itemWear(db, ids),
-    logsWithItems(db, ids, null),
-  ]);
-  if (items.length !== ids.length) throw new HttpError(400, "옷장에 없는 옷이 들어 있어요. 화면을 새로 고친 뒤 다시 시도해 주세요.");
+  const [sameDay, known] = await Promise.all([db.prepare("SELECT * FROM outfit_logs WHERE worn_date = ?").bind(input.worn_date).all<Row>(), existingItemIds(db, ids)]);
+  if (known.size !== ids.length) throw new HttpError(400, "옷장에 없는 옷이 들어 있어요. 화면을 새로 고친 뒤 다시 시도해 주세요.");
 
   const existing = sameDay.results.map(rowToLog).find((l) => sameItemSet(l.item_ids, ids));
   if (existing) {
@@ -92,7 +125,6 @@ export async function createLog(env: Env, input: LogInput): Promise<{ log: Outfi
   }
 
   const id = newId();
-  const changes = computeWearChanges(null, { worn_date: input.worn_date, item_ids: ids }, others, items);
   await db.batch([
     db
       .prepare(
@@ -109,7 +141,7 @@ export async function createLog(env: Env, input: LogInput): Promise<{ log: Outfi
         JSON.stringify(input.occasion_tags ?? []),
         input.note ?? null,
       ),
-    ...wearStatements(db, changes),
+    ...wearStatements(db, id, null, { worn_date: input.worn_date, item_ids: ids }),
   ]);
   return { log: await getLogRow(db, id), duplicate: false };
 }
@@ -122,16 +154,15 @@ export async function updateLog(env: Env, id: string, patch: LogPatch): Promise<
   if (!afterIds.length) throw new HttpError(400, "입은 옷을 골라 주세요");
   const afterDate = patch.worn_date ?? before.worn_date;
 
-  const stmts: D1PreparedStatement[] = [];
-  const wearChanged = afterDate !== before.worn_date || !sameItemSet(afterIds, before.item_ids);
-  if (wearChanged) {
-    const union = [...new Set([...before.item_ids, ...afterIds])];
-    const [items, others] = await Promise.all([itemWear(db, union), logsWithItems(db, union, id)]);
-    const known = new Set(items.map((i) => i.id));
-    const added = afterIds.filter((x) => !before.item_ids.includes(x));
+  const added = afterIds.filter((x) => !before.item_ids.includes(x));
+  if (added.length) {
+    const known = await existingItemIds(db, added);
     if (added.some((x) => !known.has(x))) throw new HttpError(400, "옷장에 없는 옷이 들어 있어요. 화면을 새로 고친 뒤 다시 시도해 주세요.");
-    stmts.push(...wearStatements(db, computeWearChanges(before, { worn_date: afterDate, item_ids: afterIds }, others, items)));
   }
+  const wearChanged = afterDate !== before.worn_date || !sameItemSet(afterIds, before.item_ids);
+  const stmts: D1PreparedStatement[] = wearChanged
+    ? wearStatements(db, id, before, { worn_date: afterDate, item_ids: afterIds })
+    : [];
 
   const next = {
     outfit_id: patch.outfit_id !== undefined ? patch.outfit_id : before.outfit_id,
@@ -155,7 +186,6 @@ export async function updateLog(env: Env, id: string, patch: LogPatch): Promise<
 export async function deleteLog(env: Env, id: string): Promise<void> {
   const db = env.DB;
   const before = await getLogRow(db, id);
-  const [items, others] = await Promise.all([itemWear(db, before.item_ids), logsWithItems(db, before.item_ids, id)]);
-  await db.batch([db.prepare("DELETE FROM outfit_logs WHERE id = ?").bind(id), ...wearStatements(db, computeWearChanges(before, null, others, items))]);
+  await db.batch([db.prepare("DELETE FROM outfit_logs WHERE id = ?").bind(id), ...wearStatements(db, id, before, null)]);
   await deleteUnreferencedImages(env, [before.selfie_key]);
 }

@@ -1,5 +1,6 @@
 import type { UrlImport } from "../../shared/types";
-import { isPublicHttpUrl } from "./util";
+import { sameImageFamily, sniffImageType } from "./images";
+import { isPublicHttpUrl, readBodyLimited, safeFetch } from "./util";
 
 const UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
@@ -86,7 +87,9 @@ export function parseProductHtml(html: string, url: string): UrlImport {
 
   if (image) {
     try {
-      image = new URL(image, url).toString();
+      const abs = new URL(image, url);
+      // 페이지가 준 값이라 javascript:, data: 같은 주소가 들어올 수 있다 → http(s)만 남긴다 (위시리스트 링크/이미지로 그대로 쓰임)
+      image = abs.protocol === "http:" || abs.protocol === "https:" ? abs.toString() : null;
     } catch {
       image = null;
     }
@@ -94,34 +97,66 @@ export function parseProductHtml(html: string, url: string): UrlImport {
   return { name: name ? decodeEntities(name) : null, brand, price, image_url: image, url };
 }
 
+const MAX_HTML_BYTES = 2_000_000;
+const MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024;
+
 export async function fetchProduct(url: string): Promise<UrlImport> {
   if (!isPublicHttpUrl(url)) throw new Error("올바른 URL을 입력해 주세요");
-  const res = await fetch(url, {
+  const { res, finalUrl } = await safeFetch(url, {
     headers: { "user-agent": UA, accept: "text/html,*/*", "accept-language": "ko-KR,ko;q=0.9" },
-    redirect: "follow",
-    signal: AbortSignal.timeout(15000),
   }).catch(() => {
     throw new Error("페이지를 불러오지 못했어요 (연결 실패 또는 시간 초과)");
   });
-  if (!res.ok) throw new Error(`페이지를 불러오지 못했어요 (${res.status})`);
-  const html = (await res.text()).slice(0, 2_000_000);
-  return parseProductHtml(html, res.url || url);
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error(`페이지를 불러오지 못했어요 (${res.status})`);
+  }
+  // 아주 큰 응답을 통째로 메모리에 올리지 않게 앞부분만 읽는다 (상품 메타 태그는 보통 <head> 안에 있다)
+  const html = await readTextPrefix(res, MAX_HTML_BYTES);
+  return parseProductHtml(html, finalUrl);
 }
 
-/** 외부 이미지를 내려받아 R2에 저장하고 key를 돌려준다. 실패하면 null. */
+async function readTextPrefix(res: Response, maxBytes: number): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let out = "";
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const take = value.subarray(0, Math.max(0, maxBytes - total));
+    total += take.byteLength;
+    out += decoder.decode(take, { stream: true });
+    if (total >= maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      break;
+    }
+  }
+  return out + decoder.decode();
+}
+
+/**
+ * 외부 이미지를 내려받아 R2에 저장하고 key를 돌려준다. 실패하면 null.
+ * 리다이렉트도 한 단계씩 검사하고(safeFetch), 10MB를 넘으면 중간에 끊고, 응답 헤더가 아니라 실제 바이트로 형식을 확인한다.
+ */
 export async function saveRemoteImage(bucket: R2Bucket, imageUrl: string): Promise<string | null> {
   try {
     if (!isPublicHttpUrl(imageUrl)) return null;
-    const res = await fetch(imageUrl, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(15000) });
-    const type = res.headers.get("content-type") ?? "";
-    if (!res.ok || !type.startsWith("image/") || type.includes("svg")) return null; // SVG는 스크립트를 담을 수 있어 받지 않음
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength > 10 * 1024 * 1024) return null;
-    const rawExt = type.split("/")[1]?.split(";")[0]?.trim().toLowerCase() ?? "jpg";
-    const ext = /^[a-z0-9]{1,5}$/.test(rawExt) ? rawExt : "jpg"; // svg+xml 같은 값이 key에 들어가지 않게
-    const key = `img/${crypto.randomUUID()}.${ext}`;
-    if (buf.byteLength === 0) return null;
-    await bucket.put(key, buf, { httpMetadata: { contentType: type.split(";")[0] } });
+    const { res } = await safeFetch(imageUrl, { headers: { "user-agent": UA, accept: "image/*" } });
+    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!res.ok || !type.startsWith("image/") || type.includes("svg")) {
+      await res.body?.cancel().catch(() => undefined);
+      return null; // SVG는 스크립트를 담을 수 있어 받지 않음
+    }
+    const data = await readBodyLimited(res, MAX_REMOTE_IMAGE_BYTES);
+    if (!data || data.byteLength === 0) return null;
+    const sniffed = sniffImageType(data);
+    if (!sniffed) return null;
+    // 서버가 형식을 잘못 알려 줘도(예: webp를 image/jpeg로) 실제 형식으로 저장한다
+    const contentType = sniffed === "isobmff" ? (sameImageFamily(type, sniffed) ? type : "image/heif") : sniffed;
+    const key = `img/${crypto.randomUUID()}.${contentType.split("/")[1]}`;
+    await bucket.put(key, data, { httpMetadata: { contentType } });
     return key;
   } catch {
     return null;

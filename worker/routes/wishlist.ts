@@ -10,7 +10,7 @@ import { searchShopping, toRecommendedLinks, wishSearchQuery } from "../lib/shop
 import { coerceOutfits, sanitizeOutfits, wishPrompt } from "../lib/stylist";
 import { HttpError, newId, sha256Hex } from "../lib/util";
 import { computeValidation, VALIDATE_SCHEMA, validatePrompt, validationComment } from "../lib/validator";
-import { asRecord, asString, asStringArray, isRecord, optCategory, optEnum, optImageKey, optInt, optStr, optStrArray, paramId, readJson, reqUrl, type Body } from "../lib/validate";
+import { asRecord, asString, asStringArray, isRecord, optCategory, optEnum, optImageKey, optInt, optLink, optStr, optStrArray, paramId, readJson, reqUrl, type Body } from "../lib/validate";
 
 const app = new Hono<AppEnv>();
 
@@ -43,9 +43,9 @@ function readWishFields(b: Body): WishInput & { status?: (typeof STATUSES)[numbe
   if (price !== undefined) out.estimated_price = price;
   const imageKey = optImageKey(b, "image_key", "사진");
   if (imageKey !== undefined) out.image_key = imageKey;
-  const imageUrl = optStr(b, "image_url", 2000, "이미지 링크");
+  const imageUrl = optLink(b, "image_url", 2000, "이미지 링크");
   if (imageUrl !== undefined) out.image_url = imageUrl;
-  const shopUrl = optStr(b, "shop_url", 2000, "쇼핑몰 링크");
+  const shopUrl = optLink(b, "shop_url", 2000, "쇼핑몰 링크");
   if (shopUrl !== undefined) out.shop_url = shopUrl;
   const status = optEnum(b, "status", STATUSES, "상태");
   if (status !== undefined) out.status = status;
@@ -68,8 +68,8 @@ function wishDescription(wish: WishlistItemV2): string {
 }
 
 /** 판독 캐시 키: 옷 설명 + 옷장 시그니처 + 프로필 버전 */
-async function validationKey(desc: string, wardrobeSig: string, profileVersion: number): Promise<string> {
-  return sha256Hex(`validate:v1|${desc}|${wardrobeSig}|${profileVersion}`);
+async function validationKey(desc: string, wardrobeSig: string, profileVersion: number, imageKey: string | null): Promise<string> {
+  return sha256Hex(`validate:v2|${desc}|${imageKey ?? ""}|${wardrobeSig}|${profileVersion}`);
 }
 
 async function getWishRow(db: D1Database, id: string): Promise<Row> {
@@ -82,7 +82,7 @@ async function getWishRow(db: D1Database, id: string): Promise<Row> {
 async function withStale(row: Row, wardrobeSig: string, profileVersion: number): Promise<WishlistItemV2> {
   const wish = rowToWish(row);
   if (wish.validation) {
-    wish.validation.stale = row.validation_key !== (await validationKey(wishDescription(wish), wardrobeSig, profileVersion));
+    wish.validation.stale = row.validation_key !== (await validationKey(wishDescription(wish), wardrobeSig, profileVersion, wish.image_key));
   }
   return wish;
 }
@@ -227,7 +227,7 @@ app.post("/:id/validate", async (c) => {
   const [row, items, profile, sig] = await Promise.all([getWishRow(c.env.DB, id), getAllItems(c.env.DB), getProfile(c.env.DB), wardrobeSignature(c.env.DB)]);
   const wish = rowToWish(row);
   const desc = wishDescription(wish);
-  const key = await validationKey(desc, sig, profile.version);
+  const key = await validationKey(desc, sig, profile.version, wish.image_key);
   if (wish.validation && row.validation_key === key && c.req.query("force") !== "true") {
     return c.json({ ...wish.validation, stale: false, cached: true });
   }

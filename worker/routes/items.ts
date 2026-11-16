@@ -10,7 +10,7 @@ import { fetchProduct, saveRemoteImage } from "../lib/shop";
 import { taggingPrompt } from "../lib/stylist";
 import { HttpError, newId, todayKST } from "../lib/util";
 import {
-  asCategory, asNumber, asRecord, asString, asStringArray, isRecord, optCategory, optDate, optImageKey, optInt, optStr, optStrArray, paramId, readJson, reqUrl,
+  asCategory, asNumber, asRecord, asString, asStringArray, isRecord, optCategory, optDate, optImageKey, optInt, optLink, optStr, optStrArray, paramId, readJson, reqUrl,
   type Body,
 } from "../lib/validate";
 import { readLogFields, toLogInput } from "./logs";
@@ -33,7 +33,7 @@ export function readItemFields(b: Body): Record<string, SqlValue> {
   put("fit", optStr(b, "fit", 60, "핏"));
   put("warmth", optInt(b, "warmth", { min: 1, max: 5 }, "보온성"));
   put("image_key", optImageKey(b, "image_key", "사진"));
-  put("original_shop_url", optStr(b, "original_shop_url", 2000, "쇼핑몰 링크"));
+  put("original_shop_url", optLink(b, "original_shop_url", 2000, "쇼핑몰 링크"));
   put("purchase_price", optInt(b, "purchase_price", { min: 0, max: 1_000_000_000 }, "구매 가격"));
   put("wear_count", optInt(b, "wear_count", { min: 0, max: 100000 }, "착용 횟수"));
   put("last_worn_date", optDate(b, "last_worn_date", "마지막 착용일"));

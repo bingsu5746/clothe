@@ -10,7 +10,7 @@ import {
   type ShoppingLink,
   type WishlistItemV2,
 } from "../../shared/types";
-import { parseJsonUnknown } from "./util";
+import { isSafeLinkValue, parseJsonUnknown } from "./util";
 import { asArray, asCategory, asEnum, asNumber, asRecord, asString, asStringArray, isRecord } from "./validate";
 
 export type Row = Record<string, unknown>;
@@ -21,6 +21,12 @@ export function strOrNull(v: unknown): string | null {
 
 export function numOrNull(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** 링크로 쓰이는 컬럼: 예전에 저장된 javascript:/data: 같은 값은 내려주지 않는다 */
+export function linkOrNull(v: unknown): string | null {
+  const s = strOrNull(v);
+  return s && isSafeLinkValue(s) ? s : null;
 }
 
 /** JSON 컬럼(문자열 배열)을 안전하게 읽는다. 깨진 값이면 빈 배열. */
@@ -42,7 +48,7 @@ export function rowToItem(r: Row): Item {
     style_tags: jsonStrings(r.style_tags),
     warmth: numOrNull(r.warmth),
     image_key: strOrNull(r.image_key),
-    original_shop_url: strOrNull(r.original_shop_url),
+    original_shop_url: linkOrNull(r.original_shop_url),
     purchase_price: numOrNull(r.purchase_price),
     wear_count: numOrNull(r.wear_count) ?? 0,
     last_worn_date: strOrNull(r.last_worn_date),
@@ -79,7 +85,7 @@ export function rowToInspiration(r: Row): Inspiration {
   return {
     id: String(r.id),
     image_key: asString(r.image_key),
-    source_url: strOrNull(r.source_url),
+    source_url: linkOrNull(r.source_url),
     note: strOrNull(r.note),
     analysis: coerceInspirationAnalysis(parseJsonUnknown(r.analysis)),
     created_at: asString(r.created_at),
@@ -99,7 +105,7 @@ export function coerceLinks(v: unknown, max = 20): ShoppingLink[] {
       url,
       source: asEnum(x.source, LINK_SOURCES) ?? "custom",
       price: asNumber(x.price),
-      image_url: strOrNull(x.image_url),
+      image_url: linkOrNull(x.image_url),
       mall: strOrNull(x.mall),
     });
     if (out.length >= max) break;
@@ -128,8 +134,8 @@ export function rowToWish(r: Row): WishlistItemV2 {
     colors: jsonStrings(r.colors),
     estimated_price: numOrNull(r.estimated_price),
     image_key: strOrNull(r.image_key),
-    image_url: strOrNull(r.image_url),
-    shop_url: strOrNull(r.shop_url),
+    image_url: linkOrNull(r.image_url),
+    shop_url: linkOrNull(r.shop_url),
     reference_id: strOrNull(r.reference_id),
     status: asEnum(r.status, ["wanted", "bought", "dropped"] as const) ?? "wanted",
     bought_item_id: strOrNull(r.bought_item_id),
@@ -190,8 +196,26 @@ export async function cachePut(db: D1Database, key: string, value: unknown): Pro
 }
 
 /** Gemini 프롬프트에 넣을 옷장 요약 (이미지 없이 텍스트만 → 토큰 절약) */
+/**
+ * 프롬프트의 한 칸에 들어갈 글 정리: 줄바꿈과 구분자(|)를 없애서, 쇼핑몰에서 긁어 온 이름 등이
+ * "\nid=가짜 | ..." 같은 가짜 옷장 줄이나 지시문을 만들어 내지 못하게 한다.
+ * (모델 응답의 id는 어차피 실제 옷장 id 집합으로 다시 거르지만, 엉뚱한 옷이 추천되는 것도 막는다)
+ */
+export function promptField(v: string, max = 80): string {
+  return v.replace(/[\s|]+/g, " ").trim().slice(0, max);
+}
+
 export function wardrobeForPrompt(items: Item[]): string {
   return items
+    .map((raw) => ({
+      ...raw,
+      name: promptField(raw.name),
+      sub_category: raw.sub_category ? promptField(raw.sub_category, 40) : null,
+      colors: raw.colors.map((x) => promptField(x, 20)),
+      material: raw.material ? promptField(raw.material, 40) : null,
+      fit: raw.fit ? promptField(raw.fit, 30) : null,
+      style_tags: raw.style_tags.map((x) => promptField(x, 20)),
+    }))
     .map((i) =>
       [
         `id=${i.id}`,

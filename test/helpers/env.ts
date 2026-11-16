@@ -28,7 +28,7 @@ class FakeStatement {
   execute() {
     const stmt = this.db.prepare(this.sql);
     const a = this.args();
-    const isRead = /^\s*(SELECT|PRAGMA|WITH)/i.test(this.sql);
+    const isRead = /^\s*(SELECT|PRAGMA|WITH)/i.test(this.sql) || /\bRETURNING\b/i.test(this.sql);
     if (isRead) {
       const results = (stmt.all as (...x: unknown[]) => Record<string, unknown>[])(...a).map((r) => ({ ...r }));
       return { results, success: true, meta: { changes: 0 } };
@@ -108,6 +108,9 @@ export class FakeR2 {
   }
 }
 
+/** 16자 이상이어야 SESSION_SECRET으로 쓰인다 (worker/lib/auth.ts) */
+export const TEST_SECRET = "test-secret-0123456789abcdef";
+
 export interface TestEnv {
   env: Env;
   db: FakeD1;
@@ -125,7 +128,7 @@ export function makeEnv(overrides: Partial<Env> = {}): TestEnv {
     TRYON_PROVIDER: "",
     TRYON_MODEL: "",
     APP_PIN: "1234",
-    SESSION_SECRET: "test-secret",
+    SESSION_SECRET: TEST_SECRET,
     SHORTCUT_TOKEN: "shortcut-token",
     GEMINI_API_KEY: "",
     NAVER_CLIENT_ID: "",
@@ -136,7 +139,7 @@ export function makeEnv(overrides: Partial<Env> = {}): TestEnv {
   return { env, db, bucket };
 }
 
-export async function sessionCookie(secret = "test-secret"): Promise<string> {
+export async function sessionCookie(secret = TEST_SECRET): Promise<string> {
   return `${SESSION_COOKIE}=${await createSessionToken(secret)}`;
 }
 
