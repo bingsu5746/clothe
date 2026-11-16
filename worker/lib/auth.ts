@@ -1,4 +1,5 @@
-import { HttpError } from "./util";
+import { HttpError, parseJsonUnknown } from "./util";
+import { isRecord } from "./validate";
 
 const enc = new TextEncoder();
 
@@ -42,11 +43,17 @@ interface Failures {
   first: number;
 }
 
+function parseFailures(value: string | undefined): Failures | null {
+  const v = parseJsonUnknown(value);
+  if (!isRecord(v) || typeof v.count !== "number" || typeof v.first !== "number") return null;
+  return { count: v.count, first: v.first };
+}
+
 /** PIN 무차별 대입 방지: 15분 안에 5번 틀리면 15분 잠금 */
 export async function checkLoginLock(db: D1Database, now = Date.now()): Promise<void> {
   const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(LOCK_KEY).first<{ value: string }>();
-  if (!row) return;
-  const f = JSON.parse(row.value) as Failures;
+  const f = parseFailures(row?.value);
+  if (!f) return;
   if (now - f.first > LOCK_MS) return;
   if (f.count >= MAX_FAILURES) {
     const mins = Math.ceil((f.first + LOCK_MS - now) / 60000);
@@ -56,7 +63,7 @@ export async function checkLoginLock(db: D1Database, now = Date.now()): Promise<
 
 export async function recordLoginFailure(db: D1Database, now = Date.now()): Promise<void> {
   const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(LOCK_KEY).first<{ value: string }>();
-  let f: Failures = row ? JSON.parse(row.value) : { count: 0, first: now };
+  let f: Failures = parseFailures(row?.value) ?? { count: 0, first: now };
   if (now - f.first > LOCK_MS) f = { count: 0, first: now };
   f.count += 1;
   await db
@@ -67,4 +74,26 @@ export async function recordLoginFailure(db: D1Database, now = Date.now()): Prom
 
 export async function clearLoginFailures(db: D1Database): Promise<void> {
   await db.prepare("DELETE FROM settings WHERE key = ?").bind(LOCK_KEY).run();
+}
+
+const SIGNED_IMAGE_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * 외부 서비스(Replicate)가 잠깐 이미지를 내려받을 수 있게 하는 서명된 경로.
+ * `/api/public/images/{만료시각}/{서명}/{key}` — 15분 뒤 만료, 서명은 세션 비밀키로 만든 HMAC.
+ */
+export async function signedImagePath(secret: string, key: string, now = Date.now()): Promise<string> {
+  const exp = String(now + SIGNED_IMAGE_TTL_MS);
+  return `/api/public/images/${exp}/${await hmac(secret, `img:${exp}:${key}`)}/${key}`;
+}
+
+export async function verifySignedImage(secret: string, exp: string, sig: string, key: string, now = Date.now()): Promise<boolean> {
+  if (!/^\d+$/.test(exp) || Number(exp) < now) return false;
+  return timingSafeEqual(sig, await hmac(secret, `img:${exp}:${key}`));
+}
+
+export function sessionSecret(env: { SESSION_SECRET?: string; APP_PIN?: string }): string {
+  const s = env.SESSION_SECRET || env.APP_PIN;
+  if (!s) throw new HttpError(503, "APP_PIN 시크릿이 설정되지 않았어요");
+  return s;
 }

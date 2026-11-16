@@ -67,6 +67,9 @@
   --text-eyebrow--letter-spacing: 0.06em;
   --text-eyebrow--font-weight: 600;
 
+  /* 사이드바가 아이콘 레일에서 전체 폭으로 바뀌는 지점 (nav: 변형) */
+  --breakpoint-nav: 1100px;
+
   /* 모서리 */
   --radius-xs: 6px;
   --radius-sm: 10px;
@@ -184,6 +187,8 @@
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     scroll-padding-top: calc(var(--safe-top) + var(--bar-h));
+    /* 브라우저 기본 당겨서 새로고침은 끄고(직접 구현), iOS의 고무줄 스크롤은 유지 */
+    overscroll-behavior-y: contain;
   }
 
   body {

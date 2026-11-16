@@ -104,7 +104,7 @@ export async function optimistic<T, R>(path: string, updater: (cur: T | undefine
     if (revalidateAfter) void revalidate(path);
     return result;
   } catch (err) {
-    mutateQuery<T>(path, before);
+    mutateQuery<T>(path, () => before);
     throw err;
   }
 }

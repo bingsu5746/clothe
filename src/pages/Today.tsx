@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
 import type { Item, Outfit, SuggestedOutfit, Weather } from "../../shared/types";
-import { PinIcon, SparkIcon } from "../components/icons";
+import { CheckIcon, HangerIcon, LayersIcon, PinIcon, PlusIcon, RefreshIcon, SparkIcon } from "../components/icons";
 import { OutfitCollage } from "../components/items";
-import { Button, Card, Chip, Empty, ErrorText, PageHeader, Spinner, inputCls, toast } from "../components/ui";
+import { Button, ButtonLink, Card, Chip, ChipRow, Empty, Input, Notice, Page, Section, Skeleton, SkeletonText, toast } from "../components/ui";
 import { api } from "../lib/api";
-import { useFetch, useItems } from "../lib/items";
-import { getSavedLocation, type SavedLocation } from "../lib/location";
+import { createOutfit, useItems, useOutfits, wearItems } from "../lib/items";
+import { DEFAULT_LOCATION, type SavedLocation } from "../lib/location";
+import { useQuery } from "../lib/query";
+import { AppLink } from "../lib/router";
 import { loadWeather } from "../lib/weather";
 
 const QUICK = ["출근", "데이트", "많이 걷는 날", "편하게", "꾸안꾸", "격식 있게", "운동"];
@@ -32,53 +33,70 @@ function outfitWarmth(ids: string[], byId: Map<string, Item>): number | null {
   return ws.length ? Math.max(...ws) : null;
 }
 
+const splitKeywords = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+const todayLabel = () => new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
+
+// 화면을 오가도 날씨와 추천 결과를 다시 받지 않도록 기억해 둔다 (날씨는 20분)
+let weatherMemo: { key: string; at: number; weather: Weather } | null = null;
+let resultMemo: { result: TodayResult; keywords: string } | null = null;
+
 export default function Today() {
-  const { items, byId } = useItems();
-  const [loc, setLoc] = useState<SavedLocation | null>(null);
-  const [weather, setWeather] = useState<Weather | null>(null);
+  const { items, byId, loading: itemsLoading } = useItems();
+  const settings = useQuery<{ location?: SavedLocation }>("/settings", { staleTime: 5 * 60_000 });
+  const loc = settings.data ? (settings.data.location ?? DEFAULT_LOCATION) : settings.error ? DEFAULT_LOCATION : null;
+  const locKey = loc ? `${loc.lat},${loc.lon}` : null;
+
+  const [weather, setWeather] = useState<Weather | null>(weatherMemo?.weather ?? null);
   const [weatherErr, setWeatherErr] = useState<string | null>(null);
-  const [keywords, setKeywords] = useState("");
-  const [result, setResult] = useState<TodayResult | null>(null);
+  const [keywords, setKeywords] = useState(resultMemo?.keywords ?? "");
+  const [result, setResult] = useState<TodayResult | null>(resultMemo?.result ?? null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const saved = useFetch<Outfit[]>("/outfits");
+  const [savedTitles, setSavedTitles] = useState<Set<string>>(() => new Set());
+  const saved = useOutfits();
 
-  useEffect(() => {
-    getSavedLocation().then(setLoc);
+  const fetchWeather = useCallback(async (l: SavedLocation) => {
+    const key = `${l.lat},${l.lon}`;
+    try {
+      const w = await loadWeather(l.lat, l.lon, l.name);
+      weatherMemo = { key, at: Date.now(), weather: w };
+      setWeather(w);
+      setWeatherErr(null);
+    } catch (e) {
+      setWeatherErr((e as Error).message || "날씨를 불러오지 못했어요");
+    }
   }, []);
 
   useEffect(() => {
+    if (!loc || !locKey) return;
+    if (weatherMemo && weatherMemo.key === locKey && Date.now() - weatherMemo.at < 20 * 60_000) return;
+    void fetchWeather(loc);
+    // 위치 좌표가 바뀔 때만 다시 받는다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locKey, fetchWeather]);
+
+  const recommend = async (refresh = false) => {
     if (!loc) return;
-    loadWeather(loc.lat, loc.lon, loc.name)
-      .then(setWeather)
-      .catch((e) => setWeatherErr(e.message));
-  }, [loc]);
-
-  const recommend = useCallback(
-    async (refresh = false) => {
-      if (!loc) return;
-      setBusy(true);
-      setErr(null);
-      try {
-        const r = await api<TodayResult>("/stylist/today", {
-          method: "POST",
-          json: { weather, lat: loc.lat, lon: loc.lon, location_name: loc.name, keywords, refresh },
-        });
-        setResult(r);
-        if (r.weather) setWeather(r.weather);
-      } catch (e) {
-        setErr((e as Error).message);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [loc, keywords, weather],
-  );
-
-  const toggleKeyword = (k: string) => {
-    const parts = keywords.split(",").map((s) => s.trim()).filter(Boolean);
-    setKeywords((parts.includes(k) ? parts.filter((p) => p !== k) : [...parts, k]).join(", "));
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api<TodayResult>("/stylist/today", {
+        method: "POST",
+        json: { weather, lat: loc.lat, lon: loc.lon, location_name: loc.name, keywords, refresh },
+      });
+      resultMemo = { result: r, keywords };
+      setResult(r);
+      setSavedTitles(new Set());
+      if (r.weather) setWeather(r.weather);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const active = splitKeywords(keywords);
+  const toggleKeyword = (k: string) => setKeywords((active.includes(k) ? active.filter((p) => p !== k) : [...active, k]).join(", "));
 
   const weatherSummary = weather ? `${weather.description} ${weather.temp_min}~${weather.temp_max}°C` : undefined;
 
@@ -86,133 +104,278 @@ export default function Today() {
     const list = saved.data ?? [];
     if (!weather) return list;
     const t = targetWarmth(weather);
-    return [...list].sort((a, b) => {
-      const da = Math.abs((outfitWarmth(a.item_ids, byId) ?? t) - t);
-      const db = Math.abs((outfitWarmth(b.item_ids, byId) ?? t) - t);
-      return da - db;
-    });
+    return [...list].sort((a, b) => Math.abs((outfitWarmth(a.item_ids, byId) ?? t) - t) - Math.abs((outfitWarmth(b.item_ids, byId) ?? t) - t));
   }, [saved.data, weather, byId]);
 
   const wear = async (ids: string[], outfit_id?: string) => {
-    await api("/items/wear", { method: "POST", json: { item_ids: ids, outfit_id, weather_summary: weatherSummary } });
-    toast("오늘 착용으로 기록했어요");
+    try {
+      await wearItems(ids, { outfit_id, weather_summary: weatherSummary });
+      toast("오늘 입은 걸로 기록했어요");
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
   };
 
   const save = async (o: SuggestedOutfit) => {
-    await api("/outfits", { method: "POST", json: { name: o.title, item_ids: o.item_ids, source: "ai", reason: o.reason, tags: keywords ? keywords.split(",").map((s) => s.trim()) : [] } });
-    toast("코디를 저장했어요");
-    saved.reload();
+    // 버튼은 바로 "저장됨"으로 바뀌고, 실패하면 되돌린다
+    setSavedTitles((s) => new Set(s).add(o.title));
+    try {
+      await createOutfit({ name: o.title, item_ids: o.item_ids, source: "ai", reason: o.reason, tags: active });
+      toast("코디를 저장했어요");
+    } catch (e) {
+      setSavedTitles((s) => {
+        const next = new Set(s);
+        next.delete(o.title);
+        return next;
+      });
+      toast.error((e as Error).message);
+    }
   };
 
+  const notEnough = !itemsLoading && items.length < 2;
+
   return (
-    <>
-      <PageHeader title="오늘 뭐 입지?" />
+    <Page title="오늘" eyebrow={todayLabel()}>
+      <div className="grid gap-x-16 gap-y-10 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+        <div className="space-y-10 xl:sticky xl:top-[calc(var(--safe-top)+var(--bar-h)+8px)] xl:self-start">
+          <WeatherBlock weather={weather} error={weatherErr} onRetry={() => loc && fetchWeather(loc)} />
 
-      <Card className="mb-4">
-        {weather ? (
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <Link to="/settings" className="mb-1 inline-flex items-center gap-1 text-sm text-muted">
-                <PinIcon width={14} height={14} /> {weather.location_name ?? "현재 위치"}
-              </Link>
-              <div className="text-4xl font-extrabold tracking-tight">{weather.temp_now != null ? `${Math.round(weather.temp_now)}°` : `${Math.round(weather.temp_max)}°`}</div>
-              <div className="text-sm text-muted">
-                {weather.description} · 최저 {Math.round(weather.temp_min)}° / 최고 {Math.round(weather.temp_max)}°
-                {weather.precip_probability != null && ` · 강수 ${weather.precip_probability}%`}
-              </div>
+          <Section title="코디 추천" description="오늘 날씨와 내 옷장으로 AI가 골라 드려요.">
+            <ChipRow label="상황" className="xl:flex-wrap xl:overflow-visible">
+              {QUICK.map((k) => (
+                <Chip key={k} active={active.includes(k)} onClick={() => toggleKeyword(k)}>
+                  {k}
+                </Chip>
+              ))}
+            </ChipRow>
+            <Input
+              className="mt-3"
+              placeholder="예: 한강 피크닉, 많이 걸어요"
+              aria-label="오늘의 상황"
+              value={keywords}
+              enterKeyHint="go"
+              onChange={(e) => setKeywords(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !busy && !notEnough && recommend(false)}
+            />
+            <div className="mt-3 flex gap-2">
+              <Button variant="primary" size="lg" className="flex-1" icon={<SparkIcon size={18} />} loading={busy} onClick={() => recommend(false)} disabled={!loc || notEnough || itemsLoading}>
+                {busy ? "코디를 고르는 중" : "코디 추천받기"}
+              </Button>
+              {result && (
+                <Button size="lg" icon={<RefreshIcon size={18} />} onClick={() => recommend(true)} disabled={busy}>
+                  다시
+                </Button>
+              )}
             </div>
-            <div className={`rounded-xl px-3 py-2 text-right ${weather.diurnal_range >= 10 ? "bg-accent text-accent-ink" : "bg-surface-2"}`}>
-              <div className="text-xs font-semibold opacity-80">일교차</div>
-              <div className="text-xl font-bold">{Math.round(weather.diurnal_range)}°</div>
-            </div>
-          </div>
-        ) : weatherErr ? (
-          <ErrorText>{weatherErr}</ErrorText>
-        ) : (
-          <div className="flex h-20 items-center justify-center text-muted">
-            <Spinner />
-          </div>
-        )}
-        {weather && weather.diurnal_range >= 10 && <p className="mt-3 text-sm">일교차가 커요. 벗고 입기 쉬운 겉옷을 챙기세요.</p>}
-      </Card>
+            {notEnough && (
+              <Notice
+                tone="info"
+                className="mt-3"
+                action={
+                  <ButtonLink to="/closet/new" size="sm" variant="primary" icon={<PlusIcon size={16} />}>
+                    옷 등록하기
+                  </ButtonLink>
+                }
+              >
+                추천을 받으려면 옷장에 옷이 2벌 이상 있어야 해요.
+              </Notice>
+            )}
+            {err && (
+              <Notice
+                className="mt-3"
+                title="추천을 받지 못했어요"
+                action={
+                  <Button size="sm" onClick={() => recommend(false)}>
+                    다시 시도
+                  </Button>
+                }
+              >
+                {err}
+              </Notice>
+            )}
+          </Section>
+        </div>
 
-      <Card className="mb-6">
-        <h2 className="mb-2 font-bold">AI 코디 추천</h2>
-        <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 md:mx-0 md:flex-wrap md:px-0">
-          {QUICK.map((k) => (
-            <Chip key={k} active={keywords.split(",").map((s) => s.trim()).includes(k)} onClick={() => toggleKeyword(k)}>
-              {k}
-            </Chip>
-          ))}
-        </div>
-        <input className={inputCls} placeholder="예: 한강 피크닉, 많이 걸어요" value={keywords} onChange={(e) => setKeywords(e.target.value)} />
-        <div className="mt-3 flex gap-2">
-          <Button variant="primary" className="flex-1" loading={busy} onClick={() => recommend(false)} disabled={!loc || items.length < 2}>
-            <SparkIcon width={18} height={18} /> 코디 추천받기
-          </Button>
-          {result && (
-            <Button onClick={() => recommend(true)} disabled={busy}>
-              다시
-            </Button>
-          )}
-        </div>
-        {items.length < 2 && (
-          <p className="mt-2 text-sm text-muted">
-            추천을 받으려면 <Link to="/closet/new" className="font-semibold text-accent underline">옷장에 옷을 2벌 이상</Link> 등록해 주세요.
-          </p>
-        )}
-        <div className="mt-3">
-          <ErrorText>{err}</ErrorText>
-        </div>
-      </Card>
-
-      {result && (
-        <section className="mb-8">
-          {result.briefing && <p className="mb-3 rounded-2xl bg-surface-2 px-4 py-3 text-[15px]">{result.briefing}</p>}
-          {result.outfits.length === 0 && <Empty title="추천할 만한 조합을 찾지 못했어요">옷을 더 등록하거나 키워드를 바꿔 보세요.</Empty>}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {result.outfits.map((o, i) => (
-              <Card key={i}>
-                <h3 className="font-bold">{o.title}</h3>
-                <p className="mt-1 mb-3 text-sm text-muted">{o.reason}</p>
-                <OutfitCollage ids={o.item_ids} />
-                <div className="mt-3 flex gap-2">
-                  <Button className="flex-1" onClick={() => save(o)}>저장</Button>
-                  <Button variant="primary" className="flex-1" onClick={() => wear(o.item_ids)}>오늘 입을래요</Button>
+        <div className="min-w-0 space-y-10">
+          {(busy || result) && (
+            <Section title="오늘의 추천">
+              {busy ? (
+                <div role="status" aria-label="코디를 고르는 중">
+                  <SkeletonText lines={2} className="mb-5 max-w-lg" />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {[0, 1].map((i) => (
+                      <Card key={i}>
+                        <Skeleton className="h-5 w-2/5" />
+                        <SkeletonText lines={2} className="mt-3" />
+                        <div className="mt-4 grid grid-cols-4 gap-1.5">
+                          {[0, 1, 2, 3].map((j) => (
+                            <Skeleton key={j} className="aspect-[3/4]" />
+                          ))}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
                 </div>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
+              ) : result ? (
+                <>
+                  {result.briefing && <p className="mb-5 max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2">{result.briefing}</p>}
+                  {result.outfits.length === 0 ? (
+                    <Empty title="어울리는 조합을 찾지 못했어요">옷을 더 등록하거나 상황을 바꿔서 다시 받아 보세요.</Empty>
+                  ) : (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {result.outfits.map((o, i) => {
+                        const isSaved = savedTitles.has(o.title);
+                        return (
+                          <Card key={i} className="flex flex-col">
+                            <h3 className="text-headline">{o.title}</h3>
+                            <p className="mt-1 mb-4 text-subhead text-muted">{o.reason}</p>
+                            <div className="mt-auto">
+                              <OutfitCollage ids={o.item_ids} />
+                              <div className="mt-4 flex gap-2">
+                                <Button className="flex-1" icon={isSaved ? <CheckIcon size={18} /> : undefined} disabled={isSaved} onClick={() => save(o)}>
+                                  {isSaved ? "저장됨" : "저장"}
+                                </Button>
+                                <Button variant="primary" className="flex-1" onClick={() => wear(o.item_ids)}>
+                                  오늘 입을래요
+                                </Button>
+                              </div>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </Section>
+          )}
 
-      <section>
-        <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="text-lg font-bold">저장한 코디에서 고르기</h2>
-          <Link to="/outfits" className="text-sm font-semibold text-muted">전체 보기</Link>
+          <Section
+            title="저장한 코디"
+            description={weather && sortedSaved.length > 1 ? "오늘 기온에 맞는 순서예요." : undefined}
+            action={
+              sortedSaved.length > 0 && (
+                <AppLink to="/outfits" className="text-subhead font-medium text-muted hover:text-ink">
+                  전체 보기
+                </AppLink>
+              )
+            }
+          >
+            {saved.loading ? (
+              <div className="scroll-x bleed-gutter gap-3 md:mx-0 md:grid md:grid-cols-2 md:overflow-visible md:px-0">
+                {[0, 1].map((i) => (
+                  <Card key={i} className="w-[78%] shrink-0 md:w-auto">
+                    <Skeleton className="h-5 w-1/2" />
+                    <div className="mt-3 grid grid-cols-4 gap-1.5">
+                      {[0, 1, 2, 3].map((j) => (
+                        <Skeleton key={j} className="aspect-[3/4]" />
+                      ))}
+                    </div>
+                    <Skeleton className="mt-4 h-11 rounded-full" />
+                  </Card>
+                ))}
+              </div>
+            ) : sortedSaved.length === 0 ? (
+              <Empty
+                icon={<LayersIcon size={26} />}
+                title="저장한 코디가 아직 없어요"
+                className="py-10 md:py-12"
+                action={
+                  <ButtonLink to="/outfits" icon={<HangerIcon size={18} />}>
+                    직접 조합하기
+                  </ButtonLink>
+                }
+              >
+                추천받은 코디를 저장하거나, 옷장에서 직접 골라 만들어 보세요.
+              </Empty>
+            ) : (
+              <div className="scroll-x bleed-gutter snap-x snap-mandatory gap-3 md:mx-0 md:grid md:snap-none md:grid-cols-2 md:overflow-visible md:px-0">
+                {sortedSaved.slice(0, 8).map((o) => (
+                  <SavedOutfitCard key={o.id} outfit={o} onWear={() => wear(o.item_ids, o.id)} />
+                ))}
+              </div>
+            )}
+          </Section>
         </div>
-        {weather && sortedSaved.length > 0 && <p className="-mt-2 mb-3 text-xs text-muted">오늘 기온에 맞는 순서로 보여 드려요</p>}
-        {saved.loading ? (
-          <Spinner />
-        ) : sortedSaved.length === 0 ? (
-          <Empty title="아직 저장한 코디가 없어요">AI 추천에서 저장하거나 코디 탭에서 직접 만들어 보세요.</Empty>
-        ) : (
-          <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:px-0">
-            {sortedSaved.slice(0, 9).map((o) => (
-              <Card key={o.id} className="w-64 shrink-0 snap-start md:w-auto">
-                <Link to={`/outfits/${o.id}`}>
-                  <h3 className="mb-2 truncate font-bold">{o.name}</h3>
-                  <OutfitCollage ids={o.item_ids} />
-                </Link>
-                <Button variant="primary" className="mt-3 w-full" onClick={() => wear(o.item_ids, o.id)}>오늘 입을래요</Button>
-              </Card>
-            ))}
-          </div>
-        )}
-      </section>
-      <p className="mt-10 text-center text-xs text-muted">
-        날씨 데이터: <a className="underline" href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo.com</a> (CC BY 4.0)
+      </div>
+
+      <p className="mt-14 text-caption text-faint">
+        날씨 데이터{" "}
+        <a className="underline underline-offset-2 hover:text-muted" href="https://open-meteo.com/" target="_blank" rel="noreferrer">
+          Open-Meteo.com
+        </a>{" "}
+        (CC BY 4.0)
       </p>
-    </>
+    </Page>
+  );
+}
+
+function SavedOutfitCard({ outfit, onWear }: { outfit: Outfit; onWear: () => void }) {
+  const pending = outfit.id.startsWith("temp-");
+  return (
+    <Card className="flex w-[78%] shrink-0 snap-start flex-col md:w-auto">
+      <AppLink to={`/outfits/${outfit.id}`} aria-disabled={pending} className={`pressable-soft block rounded-sm ${pending ? "pointer-events-none" : ""}`}>
+        <h3 className="mb-3 truncate text-headline">{outfit.name}</h3>
+        <OutfitCollage ids={outfit.item_ids} />
+      </AppLink>
+      <Button className="mt-4" block onClick={onWear}>
+        오늘 입을래요
+      </Button>
+    </Card>
+  );
+}
+
+function WeatherBlock({ weather, error, onRetry }: { weather: Weather | null; error: string | null; onRetry: () => void }) {
+  if (!weather) {
+    if (error)
+      return (
+        <Notice
+          title="날씨를 불러오지 못했어요"
+          action={
+            <Button size="sm" onClick={onRetry}>
+              다시 시도
+            </Button>
+          }
+        >
+          {error}
+        </Notice>
+      );
+    return (
+      <div role="status" aria-label="날씨를 불러오는 중">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="mt-3 h-14 w-28" />
+        <Skeleton className="mt-3 h-4 w-48" />
+        <Skeleton className="mt-6 h-14 w-full rounded-lg" />
+      </div>
+    );
+  }
+  const big = Math.round(weather.temp_now ?? weather.temp_max);
+  const swing = Math.round(weather.diurnal_range);
+  return (
+    <section aria-label="오늘 날씨">
+      <AppLink to="/settings" className="inline-flex items-center gap-1 rounded-sm text-subhead font-medium text-muted hover:text-ink">
+        <PinIcon size={15} /> {weather.location_name ?? "현재 위치"}
+      </AppLink>
+      <div className="mt-1 flex items-end gap-4">
+        <div className="text-display md:text-[4.5rem] tabular">{big}°</div>
+        <div className="pb-1.5 text-callout text-ink-2">{weather.description}</div>
+      </div>
+      <dl className="mt-5 grid grid-cols-4 divide-x divide-line rounded-lg bg-surface py-3 shadow-[0_0_0_1px_var(--line)]">
+        {(
+          [
+            ["최저", `${Math.round(weather.temp_min)}°`],
+            ["최고", `${Math.round(weather.temp_max)}°`],
+            ["일교차", `${swing}°`],
+            ["강수", weather.precip_probability != null ? `${weather.precip_probability}%` : "–"],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label} className="px-3 text-center">
+            <dt className="text-caption text-muted">{label}</dt>
+            <dd className="mt-0.5 text-headline tabular">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      {swing >= 10 && <p className="mt-3 text-subhead text-ink-2">일교차가 커요. 벗고 입기 쉬운 겉옷을 챙기세요.</p>}
+    </section>
   );
 }

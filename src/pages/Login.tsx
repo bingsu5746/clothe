@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Button, ErrorText, inputCls } from "../components/ui";
+import { HangerIcon } from "../components/icons";
+import { Button, Notice, inputCls } from "../components/ui";
 import { api } from "../lib/api";
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
@@ -7,9 +8,9 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
-    <div className="grid min-h-dvh place-items-center px-6 pt-safe pb-safe">
+    <main className="grid min-h-dvh place-items-center px-6 pt-safe pb-safe">
       <form
-        className="w-full max-w-xs space-y-4"
+        className="w-full max-w-[320px] animate-rise-in"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
@@ -19,17 +20,19 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             onLogin();
           } catch (e) {
             setErr((e as Error).message);
+            setPin("");
           } finally {
             setBusy(false);
           }
         }}
       >
-        <div className="text-center">
-          <div className="text-2xl font-extrabold tracking-tight">내 옷장</div>
-          <p className="mt-1 text-sm text-muted">PIN을 입력해 주세요</p>
-        </div>
+        <span className="grid size-14 place-items-center rounded-[18px] bg-accent text-accent-ink">
+          <HangerIcon size={30} strokeWidth={1.7} />
+        </span>
+        <h1 className="mt-6 text-large-title">내 옷장</h1>
+        <p className="mt-1.5 text-callout text-muted">PIN을 입력해 주세요.</p>
         <input
-          className={`${inputCls} text-center text-2xl tracking-[0.4em]`}
+          className={`${inputCls} mt-8 h-14 text-center text-[24px] tracking-[0.5em] placeholder:tracking-normal`}
           type="password"
           inputMode="numeric"
           autoComplete="current-password"
@@ -37,12 +40,13 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           value={pin}
           onChange={(e) => setPin(e.target.value)}
           aria-label="PIN"
+          aria-invalid={!!err}
         />
-        <ErrorText>{err}</ErrorText>
-        <Button variant="primary" className="w-full" loading={busy} disabled={!pin}>
+        <Notice className="mt-3">{err}</Notice>
+        <Button type="submit" variant="primary" size="lg" block className="mt-4" loading={busy} disabled={!pin}>
           들어가기
         </Button>
       </form>
-    </div>
+    </main>
   );
 }
