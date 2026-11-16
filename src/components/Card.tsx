@@ -41,7 +41,7 @@ export function Stat({ label, value, className = "" }: { label: ReactNode; value
   return (
     <div className={`min-w-0 ${className}`}>
       <div className="text-footnote text-muted">{label}</div>
-      <div className="mt-0.5 truncate text-title-2 tabular">{value}</div>
+      <div className="mt-0.5 text-headline whitespace-nowrap tabular">{value}</div>
     </div>
   );
 }

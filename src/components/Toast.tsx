@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { usePresence } from "../lib/hooks";
 
@@ -40,13 +40,13 @@ toast.dismiss = () => {
   emit();
 };
 
-let lastShown: ToastState | null = null;
-
 export function ToastHost() {
   const state = useSyncExternalStore(subscribe, () => current);
   const { mounted, closing } = usePresence(!!state, 180);
-  if (state) lastShown = state;
-  const shown = state ?? lastShown;
+  // 사라지는 애니메이션 동안에도 내용을 보여 주기 위해 마지막 토스트를 기억한다
+  const [last, setLast] = useState<ToastState | null>(null);
+  if (state && state !== last) setLast(state);
+  const shown = state ?? last;
 
   useEffect(() => {
     if (!state) return;

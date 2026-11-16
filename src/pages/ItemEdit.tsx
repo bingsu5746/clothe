@@ -261,7 +261,7 @@ function ItemEditor({ id }: { id: string | undefined }) {
       <div className="space-y-8">
         {/* 사진 */}
         <section aria-label="사진">
-          <div className="relative mx-auto w-full max-w-[280px]">
+          <div className="relative mx-auto w-full max-w-[248px]">
             <Img
               src={src}
               alt={form.name}
@@ -293,14 +293,14 @@ function ItemEditor({ id }: { id: string | undefined }) {
           </div>
 
           <div className="mt-4 flex flex-wrap justify-center gap-2">
-            <PhotoInput onPick={onPhoto} disabled={!!busy} className={buttonClass({ variant: "secondary" })}>
-              <ImageIcon size={18} /> {form.image_key ? "사진 바꾸기" : "사진 고르기"}
+            <PhotoInput onPick={onPhoto} disabled={!!busy} className={buttonClass({ variant: "secondary", size: "sm" })}>
+              <ImageIcon size={16} /> {form.image_key ? "사진 바꾸기" : "사진 고르기"}
             </PhotoInput>
-            <PhotoInput onPick={onPhoto} capture disabled={!!busy} className={buttonClass({ variant: "secondary" })}>
-              <CameraIcon size={18} /> 찍기
+            <PhotoInput onPick={onPhoto} capture disabled={!!busy} className={buttonClass({ variant: "secondary", size: "sm" })}>
+              <CameraIcon size={16} /> 찍기
             </PhotoInput>
             {form.image_key && (
-              <Button variant="secondary" icon={<SparkIcon size={18} />} onClick={() => analyze(form.image_key!).finally(() => setBusy(null))} disabled={!!busy}>
+              <Button variant="secondary" size="sm" icon={<SparkIcon size={16} />} onClick={() => analyze(form.image_key!).finally(() => setBusy(null))} disabled={!!busy}>
                 AI 분석
               </Button>
             )}
@@ -350,9 +350,9 @@ function ItemEditor({ id }: { id: string | undefined }) {
         {source && (
           <section aria-label="착용 기록">
             <div className="grid grid-cols-3 divide-x divide-line rounded-lg bg-surface py-3.5 shadow-[0_0_0_1px_var(--line)]">
-              <Stat className="px-4" label="착용" value={`${source.wear_count}회`} />
-              <Stat className="px-4" label="1회당" value={c != null ? won(c) : "–"} />
-              <Stat className="px-4" label="마지막" value={source.last_worn_date ? source.last_worn_date.slice(5).replace("-", ".") : "–"} />
+              <Stat className="px-3.5" label="착용" value={`${source.wear_count}회`} />
+              <Stat className="px-3.5" label="1회당" value={c != null ? won(c) : "–"} />
+              <Stat className="px-3.5" label="마지막" value={source.last_worn_date ? source.last_worn_date.slice(5).replace("-", ".") : "–"} />
             </div>
             <Button variant="primary" block className="mt-3" onClick={wearToday}>
               오늘 입었어요

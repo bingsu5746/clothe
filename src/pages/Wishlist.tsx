@@ -4,6 +4,8 @@ import { HeartIcon, ImageIcon, LinkIcon, PlusIcon } from "../components/icons";
 import { PhotoInput } from "../components/items";
 import { Button, Empty, Eyebrow, Field, IconButton, Img, Input, Notice, Page, Segmented, Sheet, Skeleton, buttonClass } from "../components/ui";
 import { api, imageUrl, uploadImage, won } from "../lib/api";
+import { useIsWide } from "../lib/hooks";
+import { MORE_PATH } from "../nav";
 import { mutateQuery, useQuery } from "../lib/query";
 import { AppLink, useNav } from "../lib/router";
 
@@ -25,6 +27,7 @@ export default function Wishlist() {
   const { data, loading, error, reload } = useQuery<WishlistItem[]>(WISH_PATH);
   const [filter, setFilter] = useState<Filter>("wanted");
   const [adding, setAdding] = useState(false);
+  const wide = useIsWide();
 
   const { list, total, unknown, counts } = useMemo(() => {
     const all = data ?? [];
@@ -40,6 +43,8 @@ export default function Wishlist() {
   return (
     <Page
       title="위시리스트"
+      back={wide ? undefined : MORE_PATH}
+      large
       right={
         <IconButton label="위시리스트에 추가" variant="primary" onClick={() => setAdding(true)}>
           <PlusIcon size={20} />

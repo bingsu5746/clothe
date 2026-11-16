@@ -5,8 +5,8 @@ import { BackIcon, CloseIcon } from "./icons";
 
 export type PageWidth = "narrow" | "default" | "wide";
 const WIDTH: Record<PageWidth, string> = {
-  narrow: "mx-auto w-full max-w-[680px]",
-  default: "mx-auto w-full max-w-[1120px]",
+  narrow: "w-full max-w-[720px]",
+  default: "w-full max-w-[1200px]",
   wide: "w-full",
 };
 
@@ -51,7 +51,7 @@ export function PageHeader({ title, eyebrow, subtitle, back, backStyle = "back",
 
   return (
     <>
-      {!large && <div ref={sentinelRef} aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px" />}
+      {!large && <div ref={sentinelRef} aria-hidden className="pointer-events-none absolute inset-x-0 top-[calc(var(--safe-top)+var(--bar-h))] h-2" />}
       <div
         ref={barRef}
         className={`sticky top-0 z-20 pt-safe transition-[background-color,box-shadow] duration-(--dur-base) ${scrolled ? "bar-material hairline-b" : ""}`}

@@ -45,7 +45,6 @@ export default function InspirationDetail() {
     // 처음 열었을 때 분석 결과가 없으면 한 번만 자동으로 분석 (결과는 서버에 저장되어 다시 호출하지 않음)
     if (!needsAnalysis || !id || autoTried.current === id) return;
     autoTried.current = id;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 서버 요청을 시작하며 진행 상태를 켜는 것
     void analyze();
   }, [needsAnalysis, id, analyze]);
 
@@ -151,21 +150,31 @@ export default function InspirationDetail() {
               ))}
             </div>
           ) : !insp.analysis ? (
-            <>
-              {err && <Notice title="AI 분석을 하지 못했어요">{err}</Notice>}
+            err ? (
+              <Notice
+                title="AI 분석을 하지 못했어요"
+                action={
+                  <Button size="sm" icon={<RefreshIcon size={16} />} onClick={() => analyze()}>
+                    다시 시도
+                  </Button>
+                }
+              >
+                {err}
+              </Notice>
+            ) : (
               <Empty
                 icon={<SparkIcon size={26} />}
                 title="아직 분석하지 않았어요"
                 className="py-10 md:py-14"
                 action={
                   <Button variant="primary" icon={<SparkIcon size={18} />} onClick={() => analyze()}>
-                    {err ? "다시 시도" : "AI로 분석하기"}
+                    AI로 분석하기
                   </Button>
                 }
               >
                 사진 속 옷을 하나씩 나눠서 내 옷장의 비슷한 옷을 찾아 드려요.
               </Empty>
-            </>
+            )
           ) : (
             <>
               {err && <Notice title="다시 분석하지 못했어요">{err}</Notice>}

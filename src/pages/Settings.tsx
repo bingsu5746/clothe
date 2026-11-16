@@ -3,6 +3,8 @@ import { ChevronDownIcon, CopyIcon, LogoutIcon, MoonIcon, PhoneIcon, PinIcon, Re
 import { Button, IconButton, Input, ListGroup, ListRow, Notice, Page, Segmented, confirmDialog, toast } from "../components/ui";
 import { api } from "../lib/api";
 import { DEFAULT_LOCATION, currentPosition, saveLocation, type SavedLocation } from "../lib/location";
+import { useIsWide } from "../lib/hooks";
+import { MORE_PATH } from "../nav";
 import { clearQueries, mutateQuery, useQuery } from "../lib/query";
 import { useThemeMode, type ThemeMode } from "../lib/theme";
 import { searchPlace, type GeoResult as Geo } from "../lib/weather";
@@ -19,6 +21,7 @@ export default function Settings() {
   const settings = useQuery<{ location?: SavedLocation }>("/settings", { staleTime: 5 * 60_000 });
   const loc = settings.data ? (settings.data.location ?? DEFAULT_LOCATION) : null;
   const [theme, setTheme] = useThemeMode();
+  const wide = useIsWide();
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Geo[] | null>(null);
   const [busy, setBusy] = useState<"search" | "gps" | null>(null);
@@ -74,7 +77,7 @@ export default function Settings() {
   const webhook = `${origin}/api/webhook/shortcut`;
 
   return (
-    <Page title="설정" width="narrow">
+    <Page title="설정" width="narrow" back={wide ? undefined : MORE_PATH} large>
       <div className="space-y-8">
         <ListGroup title="화면">
           <div className="px-4 py-3.5">

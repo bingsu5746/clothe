@@ -3,7 +3,7 @@ import { useParams } from "react-router";
 import { CATEGORIES, CATEGORY_LABEL, type SuggestedOutfit, type WishlistItem } from "../../shared/types";
 import { ChevronRightIcon, ExternalIcon, HeartIcon, RefreshIcon, SparkIcon, TrashIcon } from "../components/icons";
 import { ItemImage, ITEM_RATIO, OutfitCollage } from "../components/items";
-import { Badge, Button, Card, Chip, ChipRow, Empty, Field, IconButton, Img, Input, Notice, Page, Section, Skeleton, SkeletonText, buttonClass, confirmDialog, promptDialog, toast } from "../components/ui";
+import { Button, Card, Chip, ChipRow, Empty, Field, IconButton, Img, Input, Notice, Page, Section, Skeleton, SkeletonText, buttonClass, confirmDialog, promptDialog, toast } from "../components/ui";
 import { api, imageUrl, won } from "../lib/api";
 import { ITEMS_PATH, useItems } from "../lib/items";
 import { mutateQuery, revalidate, useQuery } from "../lib/query";
@@ -127,7 +127,9 @@ function WishDetailView({ id }: { id: string }) {
   return (
     <Page
       title={w.name}
+      eyebrow={`${STATUS_LABEL[w.status]} · ${w.estimated_price != null ? won(w.estimated_price) : "가격 미정"}`}
       back="/wishlist"
+      large
       right={
         <IconButton label="위시리스트에서 삭제" className="text-danger" onClick={remove}>
           <TrashIcon size={20} />
@@ -163,14 +165,6 @@ function WishDetailView({ id }: { id: string }) {
         </div>
 
         <div className="min-w-0 space-y-8">
-          <div>
-            <div className="flex items-center gap-2">
-              <Badge tone={w.status === "wanted" ? "solid" : "neutral"}>{STATUS_LABEL[w.status]}</Badge>
-            </div>
-            <h2 className="mt-3 text-title-1">{w.name}</h2>
-            <div className="mt-1 text-title-2 text-ink-2 tabular">{w.estimated_price != null ? won(w.estimated_price) : "가격 미정"}</div>
-          </div>
-
           <section className="space-y-5">
             <Field label="이름">
               <Input key={w.name} defaultValue={w.name} onBlur={(e) => e.target.value.trim() && e.target.value !== w.name && patch({ name: e.target.value.trim() })} />

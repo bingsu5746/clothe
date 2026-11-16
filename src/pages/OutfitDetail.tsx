@@ -9,6 +9,7 @@ import { OUTFITS_PATH, useItems, useOutfits, wearItems } from "../lib/items";
 import { mutateQuery, optimistic } from "../lib/query";
 import { AppLink, useGoBack } from "../lib/router";
 
+const SOURCE_LABEL: Record<Outfit["source"], string> = { ai: "AI 추천", manual: "직접 만듦", reference: "스크랩에서" };
 const GRID = "grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 md:grid-cols-4 md:gap-x-4 xl:grid-cols-5";
 
 export default function OutfitDetail() {
@@ -89,7 +90,9 @@ export default function OutfitDetail() {
   return (
     <Page
       title={outfit.name}
+      eyebrow={`${SOURCE_LABEL[outfit.source]} · ${outfit.item_ids.length}벌`}
       back="/outfits"
+      large
       right={
         <>
           <IconButton label="이름 변경" onClick={rename}>
@@ -101,11 +104,7 @@ export default function OutfitDetail() {
         </>
       }
     >
-      <div className="mb-6 md:mb-8">
-        <h2 className="text-title-1 md:text-large-title">{outfit.name}</h2>
-        <p className="mt-1 text-subhead text-muted">{outfit.item_ids.length}벌</p>
-        {outfit.reason && <p className="mt-4 max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2">{outfit.reason}</p>}
-      </div>
+      {outfit.reason && <p className="mb-6 max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2 md:mb-8">{outfit.reason}</p>}
 
       {items.length === 0 ? (
         <Empty title="이 코디의 옷이 모두 삭제되었어요" action={<Button onClick={() => setEditing(true)}>옷 다시 고르기</Button>} />

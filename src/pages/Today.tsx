@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Item, Outfit, SuggestedOutfit, Weather } from "../../shared/types";
 import { CheckIcon, HangerIcon, LayersIcon, PinIcon, PlusIcon, RefreshIcon, SparkIcon } from "../components/icons";
 import { OutfitCollage } from "../components/items";
@@ -55,25 +55,27 @@ export default function Today() {
   const [savedTitles, setSavedTitles] = useState<Set<string>>(() => new Set());
   const saved = useOutfits();
 
-  const fetchWeather = useCallback(async (l: SavedLocation) => {
-    const key = `${l.lat},${l.lon}`;
-    try {
-      const w = await loadWeather(l.lat, l.lon, l.name);
-      weatherMemo = { key, at: Date.now(), weather: w };
-      setWeather(w);
-      setWeatherErr(null);
-    } catch (e) {
-      setWeatherErr((e as Error).message || "날씨를 불러오지 못했어요");
-    }
-  }, []);
-
+  const [weatherTry, setWeatherTry] = useState(0);
   useEffect(() => {
     if (!loc || !locKey) return;
-    if (weatherMemo && weatherMemo.key === locKey && Date.now() - weatherMemo.at < 20 * 60_000) return;
-    void fetchWeather(loc);
-    // 위치 좌표가 바뀔 때만 다시 받는다
+    if (weatherTry === 0 && weatherMemo && weatherMemo.key === locKey && Date.now() - weatherMemo.at < 20 * 60_000) return;
+    let cancelled = false;
+    loadWeather(loc.lat, loc.lon, loc.name)
+      .then((w) => {
+        weatherMemo = { key: locKey, at: Date.now(), weather: w };
+        if (cancelled) return;
+        setWeather(w);
+        setWeatherErr(null);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setWeatherErr(e.message || "날씨를 불러오지 못했어요");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // 위치 좌표가 바뀌거나 "다시 시도"를 눌렀을 때만 다시 받는다
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locKey, fetchWeather]);
+  }, [locKey, weatherTry]);
 
   const recommend = async (refresh = false) => {
     if (!loc) return;
@@ -136,9 +138,9 @@ export default function Today() {
 
   return (
     <Page title="오늘" eyebrow={todayLabel()}>
-      <div className="grid gap-x-16 gap-y-10 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
-        <div className="space-y-10 xl:sticky xl:top-[calc(var(--safe-top)+var(--bar-h)+8px)] xl:self-start">
-          <WeatherBlock weather={weather} error={weatherErr} onRetry={() => loc && fetchWeather(loc)} />
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-10 xl:sticky xl:top-[calc(var(--safe-top)+var(--bar-h)+8px)] xl:self-start">
+          <WeatherBlock weather={weather} error={weatherErr} onRetry={() => setWeatherTry((n) => n + 1)} />
 
           <Section title="코디 추천" description="오늘 날씨와 내 옷장으로 AI가 골라 드려요.">
             <ChipRow label="상황" className="xl:flex-wrap xl:overflow-visible">

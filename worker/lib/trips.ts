@@ -155,8 +155,9 @@ export function sanitizeTripPlan(raw: unknown, validIds: Set<string>, dates: str
   asArray(r.days).forEach((d, index) => {
     if (!isRecord(d)) return;
     const n = asNumber(d.day);
-    const day = n !== null && Number.isInteger(n) && n >= 1 && n <= dates.length ? n : index + 1;
-    if (day > dates.length || byDay.has(day)) return;
+    // day 번호가 없을 때만 배열 순서를 쓴다. 범위를 벗어난 번호(예: 4일 여행의 9일차)는 버린다.
+    const day = n === null ? index + 1 : n;
+    if (!Number.isInteger(day) || day < 1 || day > dates.length || byDay.has(day)) return;
     byDay.set(day, { item_ids: clean(d.item_ids), note: asString(d.note, "", 300) });
   });
   const days: TripDayPlan[] = dates.map((date, i) => {

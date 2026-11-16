@@ -11,8 +11,16 @@
   },
   "vars": {
     // Gemini 모델 이름. '-latest' 별칭은 Google이 최신 Flash 모델로 자동 교체해 줌.
-    "GEMINI_MODEL": "gemini-flash-latest"
+    "GEMINI_MODEL": "gemini-flash-latest",
+    // 가상 피팅 제공자: "replicate" | "gemini" | "" (비우면: REPLICATE_API_TOKEN 시크릿이 있을 때만 replicate로 켜짐)
+    // gemini는 이미지 생성 모델이 무료 티어가 없어서 결제가 연결된 GEMINI_API_KEY일 때만 직접 설정할 것.
+    "TRYON_PROVIDER": "",
+    // 가상 피팅 모델을 바꿀 때만 (비우면 replicate: cuuupid/idm-vton 고정 버전, gemini: gemini-nano-banana-2.1)
+    "TRYON_MODEL": ""
   },
+  // 선택 시크릿 (대시보드 Variables and Secrets 또는 `wrangler secret put`):
+  //   NAVER_CLIENT_ID, NAVER_CLIENT_SECRET : 네이버 쇼핑 검색 API (없으면 쇼핑몰 검색 링크만 제공)
+  //   REPLICATE_API_TOKEN                  : Replicate 가상 피팅 (없으면 가상 피팅 꺼짐)
   "d1_databases": [
     {
       "binding": "DB",
