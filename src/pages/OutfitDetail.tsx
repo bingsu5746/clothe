@@ -137,7 +137,7 @@ export default function OutfitDetail() {
           open
           onClose={() => setEditing(false)}
           initial={items.map((i) => i.id)}
-          doneLabel="으로 바꾸기"
+          doneLabel="로 바꾸기"
           onDone={(ids) => {
             setEditing(false);
             void patch({ item_ids: ids });

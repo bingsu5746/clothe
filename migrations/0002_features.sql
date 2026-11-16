@@ -23,6 +23,16 @@ ALTER TABLE outfit_logs ADD COLUMN rating INTEGER;
 ALTER TABLE outfit_logs ADD COLUMN occasion_tags TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE outfit_logs ADD COLUMN note TEXT;
 
+-- 착용 기록 밖에서 알게 된 마지막 착용일 (예전 데이터, 옷 수정 화면에서 직접 입력한 값).
+-- last_worn_date = max(base_last_worn_date, 남은 착용 기록 중 가장 늦은 날짜) 로 계산해서, 기록을 지워도 예전 값이 사라지지 않게 한다.
+ALTER TABLE items ADD COLUMN base_last_worn_date TEXT;
+-- 기존 행: 마지막 착용일이 어떤 착용 기록으로도 설명되지 않으면 그 값을 기준값으로 보존
+UPDATE items SET base_last_worn_date = last_worn_date
+WHERE base_last_worn_date IS NULL AND last_worn_date IS NOT NULL AND NOT EXISTS (
+  SELECT 1 FROM outfit_logs l, json_each(CASE WHEN json_valid(l.item_ids) THEN l.item_ids ELSE '[]' END) j
+  WHERE j.value = items.id AND l.worn_date = items.last_worn_date
+);
+
 -- 살까 말까 판독 + 구매 링크
 ALTER TABLE wishlist ADD COLUMN validator_score INTEGER;
 ALTER TABLE wishlist ADD COLUMN validator_comment TEXT;

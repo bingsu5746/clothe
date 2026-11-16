@@ -119,63 +119,63 @@ describe("row mappers: 깨진 JSON 컬럼도 안전하게", () => {
 });
 
 describe("착용 횟수 규칙 (computeWearChanges)", () => {
-  const A = { id: "a", wear_count: 0, last_worn_date: null };
+  const w = (id: string, wear_count: number, last_worn_date: string | null, base_last_worn_date: string | null = null) => ({ id, wear_count, last_worn_date, base_last_worn_date });
 
   it("기록 추가: +1, 마지막 착용일 갱신", () => {
-    expect(computeWearChanges(null, { worn_date: "2026-11-10", item_ids: ["a"] }, [], [A])).toEqual([{ id: "a", wear_count: 1, last_worn_date: "2026-11-10" }]);
+    expect(computeWearChanges(null, { worn_date: "2026-11-10", item_ids: ["a"] }, [], [w("a", 0, null)])).toEqual([{ id: "a", wear_count: 1, last_worn_date: "2026-11-10" }]);
   });
 
   it("같은 날 다른 기록에 이미 있는 옷은 다시 세지 않는다", () => {
     const others = [{ worn_date: "2026-11-10", item_ids: ["a", "b"] }];
-    const items = [{ id: "a", wear_count: 1, last_worn_date: "2026-11-10" }, { id: "c", wear_count: 0, last_worn_date: null }];
+    const items = [w("a", 1, "2026-11-10"), w("c", 0, null)];
     expect(computeWearChanges(null, { worn_date: "2026-11-10", item_ids: ["a", "c"] }, others, items)).toEqual([{ id: "c", wear_count: 1, last_worn_date: "2026-11-10" }]);
   });
 
   it("과거 날짜 기록 추가: 횟수는 오르지만 마지막 착용일은 뒤로 가지 않는다", () => {
-    const r = computeWearChanges(null, { worn_date: "2026-10-01", item_ids: ["a"] }, [], [{ id: "a", wear_count: 4, last_worn_date: "2026-11-01" }]);
+    const r = computeWearChanges(null, { worn_date: "2026-10-01", item_ids: ["a"] }, [], [w("a", 4, "2026-11-01", "2026-11-01")]);
     expect(r).toEqual([{ id: "a", wear_count: 5, last_worn_date: "2026-11-01" }]);
   });
 
   it("기록 삭제: -1, 마지막 착용일은 남은 기록 중 가장 늦은 날로", () => {
     const others = [{ worn_date: "2026-11-01", item_ids: ["a"] }, { worn_date: "2026-10-20", item_ids: ["a"] }];
-    const r = computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, null, others, [{ id: "a", wear_count: 3, last_worn_date: "2026-11-10" }]);
+    const r = computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, null, others, [w("a", 3, "2026-11-10")]);
     expect(r).toEqual([{ id: "a", wear_count: 2, last_worn_date: "2026-11-01" }]);
   });
 
   it("삭제: 같은 날 다른 기록이 남아 있으면 그대로", () => {
     const others = [{ worn_date: "2026-11-10", item_ids: ["a"] }];
-    expect(computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, null, others, [{ id: "a", wear_count: 1, last_worn_date: "2026-11-10" }])).toEqual([]);
+    expect(computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, null, others, [w("a", 1, "2026-11-10")])).toEqual([]);
   });
 
-  it("삭제: 0 아래로 내려가지 않고, 유일한 기록이었으면 마지막 착용일은 null", () => {
-    expect(computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, null, [], [{ id: "a", wear_count: 0, last_worn_date: "2026-11-10" }])).toEqual([
-      { id: "a", wear_count: 0, last_worn_date: null },
-    ]);
+  it("삭제: 0 아래로 내려가지 않고, 기록도 기준값도 없으면 마지막 착용일은 null", () => {
+    expect(computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, null, [], [w("a", 0, "2026-11-10")])).toEqual([{ id: "a", wear_count: 0, last_worn_date: null }]);
+  });
+
+  it("삭제: 기록 밖에서 알던 날짜(기준값)로 되돌아간다 — 업그레이드 전 데이터 보존", () => {
+    // 예전부터 3/1에 입었다고 돼 있던 옷을 11/1 기록에 넣었다가 그 기록을 지운 경우
+    const r = computeWearChanges({ worn_date: "2026-11-01", item_ids: ["a"] }, null, [], [w("a", 3, "2026-11-01", "2026-03-01")]);
+    expect(r).toEqual([{ id: "a", wear_count: 2, last_worn_date: "2026-03-01" }]);
   });
 
   it("삭제: 직접 입력한 더 늦은 마지막 착용일은 건드리지 않는다", () => {
-    const r = computeWearChanges({ worn_date: "2026-11-01", item_ids: ["a"] }, null, [], [{ id: "a", wear_count: 5, last_worn_date: "2026-11-12" }]);
+    const r = computeWearChanges({ worn_date: "2026-11-01", item_ids: ["a"] }, null, [], [w("a", 5, "2026-11-12", "2026-11-12")]);
     expect(r).toEqual([{ id: "a", wear_count: 4, last_worn_date: "2026-11-12" }]);
   });
 
   it("수정: 옷 교체 → 빠진 옷 -1, 들어온 옷 +1, 그대로인 옷은 변화 없음", () => {
-    const items = [
-      { id: "a", wear_count: 2, last_worn_date: "2026-11-10" },
-      { id: "b", wear_count: 1, last_worn_date: "2026-11-10" },
-      { id: "c", wear_count: 0, last_worn_date: null },
-    ];
+    const items = [w("a", 2, "2026-11-10"), w("b", 1, "2026-11-10"), w("c", 0, null)];
     const r = computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a", "b"] }, { worn_date: "2026-11-10", item_ids: ["a", "c"] }, [], items);
     expect(r).toEqual([{ id: "b", wear_count: 0, last_worn_date: null }, { id: "c", wear_count: 1, last_worn_date: "2026-11-10" }]);
   });
 
   it("수정: 날짜만 앞당기면 횟수는 그대로, 마지막 착용일만 따라간다", () => {
-    const r = computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, { worn_date: "2026-11-08", item_ids: ["a"] }, [], [{ id: "a", wear_count: 1, last_worn_date: "2026-11-10" }]);
+    const r = computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, { worn_date: "2026-11-08", item_ids: ["a"] }, [], [w("a", 1, "2026-11-10")]);
     expect(r).toEqual([{ id: "a", wear_count: 1, last_worn_date: "2026-11-08" }]);
   });
 
   it("수정: 이미 다른 기록이 있는 날짜로 옮기면 그 날 중복이 되어 -1", () => {
     const others = [{ worn_date: "2026-11-08", item_ids: ["a"] }];
-    const r = computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, { worn_date: "2026-11-08", item_ids: ["a"] }, others, [{ id: "a", wear_count: 2, last_worn_date: "2026-11-10" }]);
+    const r = computeWearChanges({ worn_date: "2026-11-10", item_ids: ["a"] }, { worn_date: "2026-11-08", item_ids: ["a"] }, others, [w("a", 2, "2026-11-10")]);
     expect(r).toEqual([{ id: "a", wear_count: 1, last_worn_date: "2026-11-08" }]);
   });
 

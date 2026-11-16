@@ -266,6 +266,14 @@ describe("착용 기록", () => {
     expect((await del(`/logs/${log.body.id}`)).status).toBe(404);
   });
 
+  it("직접 입력한 마지막 착용일은 기록을 넣었다 지워도 되돌아온다", async () => {
+    const a = await addItem({ last_worn_date: "2026-03-01", wear_count: 2 });
+    const log = await post("/logs", { item_ids: [a], date: "2026-11-01" });
+    expect(wearOf(a)).toEqual({ wear_count: 3, last_worn_date: "2026-11-01" });
+    await del(`/logs/${log.body.id}`);
+    expect(wearOf(a)).toEqual({ wear_count: 2, last_worn_date: "2026-03-01" });
+  });
+
   it("같은 조합 기록이 있으면 셀카/평점을 그 기록에 채운다", async () => {
     const a = await addItem();
     const first = await post("/items/wear", { item_ids: [a], date: "2026-11-10" });

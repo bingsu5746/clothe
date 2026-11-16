@@ -47,6 +47,8 @@ export function readItemFields(b: Body): Record<string, SqlValue> {
   }
   const tags = optStrArray(b, "style_tags", { maxItems: 15, maxLen: 30 }, "스타일 태그");
   if (tags !== undefined) out.style_tags = JSON.stringify(tags);
+  // 직접 입력한 마지막 착용일은 기준값으로도 저장 (착용 기록을 지워도 이 날짜 아래로 내려가지 않음, worker/lib/wear.ts)
+  if ("last_worn_date" in out) out.base_last_worn_date = out.last_worn_date;
   if ("name" in out && out.name === null) throw new HttpError(400, "이름을 입력해 주세요");
   if ("category" in out && out.category === null) throw new HttpError(400, "카테고리를 골라 주세요");
   if ("wear_count" in out && out.wear_count === null) out.wear_count = 0;
@@ -138,7 +140,7 @@ app.patch("/:id", async (c) => {
   if (!before) throw new HttpError(404, "옷을 찾을 수 없어요");
   if (keys.length) {
     // 착용 횟수/마지막 착용일만 바뀐 경우에는 updated_at을 건드리지 않는다 (AI 추천 캐시가 불필요하게 무효화되지 않게)
-    const touch = keys.some((k) => k !== "wear_count" && k !== "last_worn_date");
+    const touch = keys.some((k) => k !== "wear_count" && k !== "last_worn_date" && k !== "base_last_worn_date");
     await c.env.DB.prepare(`UPDATE items SET ${keys.map((k) => `${k} = ?`).join(", ")}${touch ? ", updated_at = datetime('now')" : ""} WHERE id = ?`)
       .bind(...Object.values(data), id)
       .run();

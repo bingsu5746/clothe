@@ -111,6 +111,7 @@ export function countByCategory(items: Item[]): Partial<Record<Category, number>
 
 /** 옷장에서 여러 벌 고르기 (시트) */
 export function ItemPicker({ open, onClose, initial, onDone, title = "옷 고르기", doneLabel }: { open: boolean; onClose: () => void; initial: string[]; onDone: (ids: string[]) => void; title?: string; doneLabel?: string }) {
+  // doneLabel 은 "N벌" 바로 뒤에 붙는다: "으로 바꾸기" → "3벌으로"가 되지 않도록 띄어쓰기를 포함해 넘길 것 (예: " 고르기 완료")
   const { items, loading } = useItems();
   const [sel, setSel] = useState<string[]>(initial);
   const [cat, setCat] = useState<Category | "all">("all");
@@ -125,7 +126,7 @@ export function ItemPicker({ open, onClose, initial, onDone, title = "옷 고르
       size="lg"
       footer={
         <Button variant="primary" block disabled={sel.length === 0} onClick={() => onDone(sel)}>
-          {sel.length > 0 ? `${sel.length}벌 ${doneLabel ?? "선택 완료"}` : "옷을 골라 주세요"}
+          {sel.length > 0 ? `${sel.length}벌${doneLabel ?? " 선택 완료"}` : "옷을 골라 주세요"}
         </Button>
       }
     >

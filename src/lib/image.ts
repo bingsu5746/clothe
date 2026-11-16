@@ -157,7 +157,7 @@ export async function compressImage(file: Blob, maxSide = DEFAULT_MAX_SIDE, qual
 export async function composeCutout(cutout: Blob, opts: { ratio?: number; padding?: number; maxSide?: number; quality?: number } = {}): Promise<Blob> {
   const { ratio = 3 / 4, padding = 0.08, maxSide = DEFAULT_MAX_SIDE, quality = 0.86 } = opts;
   const src = await drawOriented(cutout, maxSide);
-  const sctx = src.getContext("2d");
+  const sctx = src.getContext("2d", { willReadFrequently: true });
   if (!sctx) throw new Error("이미지를 처리하지 못했어요");
   const { data, width, height } = sctx.getImageData(0, 0, src.width, src.height);
   let top = height, left = width, right = -1, bottom = -1;

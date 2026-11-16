@@ -100,7 +100,7 @@ export default function Outfits() {
           })}
         </div>
       )}
-      {picking && <ItemPicker open onClose={() => setPicking(false)} initial={[]} onDone={create} title="코디에 넣을 옷" doneLabel="으로 만들기" />}
+      {picking && <ItemPicker open onClose={() => setPicking(false)} initial={[]} onDone={create} title="코디에 넣을 옷" doneLabel="로 코디 만들기" />}
     </Page>
   );
 }

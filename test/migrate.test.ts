@@ -17,10 +17,12 @@ describe("splitSql / parseAddColumn", () => {
     for (const s of stmts) expect(s).toMatch(/^CREATE (TABLE|INDEX) IF NOT EXISTS /);
   });
 
-  it("0002는 CREATE ... IF NOT EXISTS 와 ALTER TABLE ADD COLUMN 만 쓴다", () => {
-    for (const s of splitSql(readFileSync("migrations/0002_features.sql", "utf8"))) {
-      expect(/^CREATE (TABLE|INDEX) IF NOT EXISTS /.test(s) || parseAddColumn(s) !== null, s).toBe(true);
-    }
+  it("0002는 CREATE ... IF NOT EXISTS, ALTER TABLE ADD COLUMN, 기준값 채우기 UPDATE 하나만 쓴다 (DROP/DELETE 없음)", () => {
+    const stmts = splitSql(readFileSync("migrations/0002_features.sql", "utf8"));
+    const other = stmts.filter((s) => !/^CREATE (TABLE|INDEX) IF NOT EXISTS /.test(s) && parseAddColumn(s) === null);
+    expect(other).toHaveLength(1);
+    expect(other[0]).toMatch(/^UPDATE items SET base_last_worn_date = last_worn_date\s+WHERE base_last_worn_date IS NULL/);
+    for (const s of stmts) expect(s).not.toMatch(/\b(DROP|DELETE)\b/i);
   });
 
   it("ADD COLUMN 문장에서 표/컬럼 이름을 뽑는다", () => {
@@ -67,6 +69,19 @@ describe("migrate", () => {
     expect(db.rows("SELECT id, validator_score, recommended_links FROM wishlist")).toEqual([{ id: "w1", validator_score: null, recommended_links: "[]" }]);
     expect(db.rows("SELECT id, selfie_key, occasion_tags FROM outfit_logs")).toEqual([{ id: "l1", selfie_key: null, occasion_tags: "[]" }]);
     expect(db.rows("SELECT value FROM settings")).toEqual([{ value: '{"lat":37.5}' }]);
+  });
+
+  it("마지막 착용일 기준값: 착용 기록으로 설명되지 않는 날짜만 보존한다", async () => {
+    const db = new FakeD1();
+    db.exec(INIT_SQL);
+    db.exec(`INSERT INTO items (id, name, category, last_worn_date) VALUES ('manual', '코트', 'outer', '2026-03-01'), ('logged', '청바지', 'bottom', '2026-11-01'), ('never', '셔츠', 'top', NULL);
+             INSERT INTO outfit_logs (id, worn_date, item_ids) VALUES ('l1', '2026-11-01', '["logged"]'), ('l2', '2026-11-02', 'not json');`);
+    await migrate(d1(db));
+    expect(db.rows("SELECT id, base_last_worn_date, last_worn_date FROM items ORDER BY id")).toEqual([
+      { id: "logged", base_last_worn_date: null, last_worn_date: "2026-11-01" },
+      { id: "manual", base_last_worn_date: "2026-03-01", last_worn_date: "2026-03-01" },
+      { id: "never", base_last_worn_date: null, last_worn_date: null },
+    ]);
   });
 
   it("컬럼 일부가 이미 있어도(수동 적용 등) 없는 것만 추가한다", async () => {

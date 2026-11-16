@@ -3,7 +3,7 @@ import type { OutfitLog } from "../../shared/types";
 import { jsonStrings, numOrNull, rowToLog, strOrNull, type Row } from "./db";
 import { deleteUnreferencedImages } from "./images";
 import { HttpError, newId } from "./util";
-import { computeWearChanges, sameItemSet, type ItemWear, type LogRef } from "./wear";
+import { computeWearChanges, sameItemSet, type ItemWear, type LogRef, type WearChange } from "./wear";
 
 export interface LogInput {
   worn_date: string;
@@ -38,13 +38,18 @@ async function logsWithItems(db: D1Database, itemIds: string[], excludeId: strin
 async function itemWear(db: D1Database, itemIds: string[]): Promise<ItemWear[]> {
   if (!itemIds.length) return [];
   const { results } = await db
-    .prepare(`SELECT id, wear_count, last_worn_date FROM items WHERE id IN (${placeholders(itemIds.length)})`)
+    .prepare(`SELECT id, wear_count, last_worn_date, base_last_worn_date FROM items WHERE id IN (${placeholders(itemIds.length)})`)
     .bind(...itemIds)
     .all<Row>();
-  return results.map((r) => ({ id: String(r.id), wear_count: numOrNull(r.wear_count) ?? 0, last_worn_date: strOrNull(r.last_worn_date) }));
+  return results.map((r) => ({
+    id: String(r.id),
+    wear_count: numOrNull(r.wear_count) ?? 0,
+    last_worn_date: strOrNull(r.last_worn_date),
+    base_last_worn_date: strOrNull(r.base_last_worn_date),
+  }));
 }
 
-function wearStatements(db: D1Database, changes: ItemWear[]): D1PreparedStatement[] {
+function wearStatements(db: D1Database, changes: WearChange[]): D1PreparedStatement[] {
   return changes.map((ch) => db.prepare("UPDATE items SET wear_count = ?, last_worn_date = ? WHERE id = ?").bind(ch.wear_count, ch.last_worn_date, ch.id));
 }
 

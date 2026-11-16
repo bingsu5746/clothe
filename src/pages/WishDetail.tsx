@@ -179,7 +179,7 @@ function WishDetailView({ id }: { id: string }) {
               </ChipRow>
             </Field>
             <div className="grid gap-5 sm:grid-cols-2 sm:gap-3">
-              <Field label="예상 가격" hint="원">
+              <Field label="예상 가격 (원)">
                 <Input
                   key={w.estimated_price ?? "none"}
                   inputMode="numeric"

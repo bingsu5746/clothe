@@ -67,7 +67,7 @@ export function Segmented<T extends string | number>({
       {index >= 0 && (
         <span
           aria-hidden
-          className="pointer-events-none absolute top-[3px] bottom-[3px] left-[3px] rounded-[8px] bg-surface shadow-2 transition-transform duration-(--dur-slow) ease-emphasized dark:bg-surface-3"
+          className="pointer-events-none absolute top-[3px] bottom-[3px] left-[3px] rounded-[8px] bg-surface shadow-2 transition-transform duration-(--dur-slow) ease-emphasized dark:bg-[#3d3d39]"
           style={{ width: `calc((100% - 6px) / ${options.length})`, transform: `translateX(${index * 100}%)` }}
         />
       )}

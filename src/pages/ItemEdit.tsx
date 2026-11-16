@@ -420,7 +420,7 @@ function ItemEditor({ id }: { id: string | undefined }) {
 
         <section className="space-y-5">
           <h2 className="text-title-2">구매 정보</h2>
-          <Field label="구매 가격" hint="원">
+          <Field label="구매 가격 (원)">
             <Input
               inputMode="numeric"
               className="tabular"
