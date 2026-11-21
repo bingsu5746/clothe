@@ -59,8 +59,9 @@ export function initPwa() {
       hiddenAt = Date.now();
       return;
     }
-    // 30초 넘게 자리를 비웠다 돌아오면 데이터 새로 받기
-    if (hiddenAt && Date.now() - hiddenAt > 30_000) void revalidateAll();
+    // 잠깐이라도(5초 넘게) 자리를 비웠다 돌아오면 화면의 데이터를 새로 받는다.
+    // (iPhone 단축어로 옷·위시리스트를 넣고 바로 앱으로 돌아왔을 때 새 항목이 보이도록. 예전 기준 30초는 그 사이에 돌아오면 안 보였다)
+    if (hiddenAt && Date.now() - hiddenAt > 5_000) void revalidateAll();
     if (Date.now() - lastCheck > CHECK_INTERVAL_MS) {
       lastCheck = Date.now();
       void checkForUpdate();

@@ -12,15 +12,24 @@ function decodeEntities(s: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => safeCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, n: string) => safeCodePoint(Number(n)));
+}
+
+function safeCodePoint(n: number): string {
+  return Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : "";
 }
 
 function meta(html: string, prop: string): string | null {
   const p = prop.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re1 = new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]*content=["']([^"']*)["']`, "i");
-  const re2 = new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${p}["']`, "i");
+  // 따옴표 종류를 맞춰서 읽는다: content="Levi's 501" 이 "Levi" 로 잘리지 않게
+  const re1 = new RegExp(`<meta[^>]+(?:property|name)=["']${p}["'][^>]*content=(?:"([^"]*)"|'([^']*)')`, "i");
+  const re2 = new RegExp(`<meta[^>]+content=(?:"([^"]*)"|'([^']*)')[^>]*(?:property|name)=["']${p}["']`, "i");
   const m = html.match(re1) ?? html.match(re2);
-  return m ? decodeEntities(m[1]).trim() || null : null;
+  const v = m ? (m[1] ?? m[2] ?? "") : null;
+  return v != null ? decodeEntities(v).trim() || null : null;
 }
 
 function toPrice(v: unknown): number | null {

@@ -32,6 +32,14 @@ describe("parseProductHtml", () => {
     expect(parseProductHtml(`<meta property="og:title" content="베스트 상품 모음">`, "https://a.com/").category).toBeNull();
   });
 
+  it("따옴표가 섞인 메타 값과 16진수 엔티티 (예전에는 \"Levi's 501\"이 \"Levi\"로 잘렸다)", () => {
+    const html = `<meta property="og:title" content="Levi's 501 &#x27;오리지널&#x27; &apos;진&apos;"><meta content='29CM "단독"' property="og:brand"><meta property="product:brand" content='Men"s'>`;
+    const r = parseProductHtml(html, "https://a.com/");
+    expect(r.name).toBe("Levi's 501 '오리지널' '진'");
+    expect(r.brand).toBe('Men"s');
+    expect(parseProductHtml(`<meta property="og:title" content="A &#0; B &#x110000; C">`, "https://a.com/").name).toBe("A  B  C");
+  });
+
   it("JSON-LD가 없으면 OpenGraph 메타태그를 쓴다", () => {
     const html = `<meta content="https://cdn.example.com/x.jpg" property="og:image"><meta property="og:title" content="셔츠 &amp; 타이"><meta property="product:price:amount" content="39,900">`;
     const r = parseProductHtml(html, "https://a.com/");

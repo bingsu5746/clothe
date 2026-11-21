@@ -2,7 +2,7 @@ import { useState } from "react";
 import { BODY_TYPE_LABEL, UNDERTONE_LABEL, type BodyAnalysis, type ColorAnalysis, type PaletteColor, type Profile as ProfileT } from "../../shared/types";
 import { CheckIcon, CloseIcon, EyedropperIcon, ImageIcon, PersonIcon, PlusIcon, RefreshIcon, ShirtIcon, SparkIcon, TrashIcon } from "../components/icons";
 import { PhotoInput } from "../components/items";
-import { Badge, Button, ButtonLink, Card, Eyebrow, Field, Img, Input, ListGroup, ListRow, Notice, Page, Section, Sheet, Skeleton, SkeletonText, confirmDialog, toast } from "../components/ui";
+import { Badge, Button, ButtonLink, Card, CommitInput, Eyebrow, Field, Img, ListGroup, ListRow, Notice, Page, Section, Sheet, Skeleton, SkeletonText, confirmDialog, toast } from "../components/ui";
 import { AiOffNotice } from "../components/AiStatus";
 import { api, imageUrl, uploadImage } from "../lib/api";
 import { readableOn } from "../lib/color";
@@ -83,10 +83,10 @@ function BodyStats({ profile: p }: { profile: ProfileT }) {
     <Section title="신체 정보" description="체형 진단 때 참고해요. 비워 둬도 돼요.">
       <div className="grid grid-cols-2 gap-3">
         <Field label="키 (cm)">
-          <Input key={`h${p.height_cm}`} inputMode="decimal" className="tabular" placeholder="예: 165" defaultValue={p.height_cm ?? ""} onBlur={(e) => save("height_cm", e.target.value)} />
+          <CommitInput key={`h${p.height_cm}`} inputMode="decimal" enterKeyHint="done" className="tabular" placeholder="예: 165" defaultValue={p.height_cm ?? ""} onCommit={(v) => save("height_cm", v)} />
         </Field>
         <Field label="몸무게 (kg)">
-          <Input key={`w${p.weight_kg}`} inputMode="decimal" className="tabular" placeholder="예: 55" defaultValue={p.weight_kg ?? ""} onBlur={(e) => save("weight_kg", e.target.value)} />
+          <CommitInput key={`w${p.weight_kg}`} inputMode="decimal" enterKeyHint="done" className="tabular" placeholder="예: 55" defaultValue={p.weight_kg ?? ""} onCommit={(v) => save("weight_kg", v)} />
         </Field>
       </div>
       <Notice className="mt-3">{err}</Notice>

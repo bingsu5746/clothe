@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, TextareaHTMLAttributes } from "react";
+import { useEffect, useRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { SearchIcon } from "./icons";
 
 /** 입력칸 공통 모양. 글자 16px(확대 방지), 높이 48px, 채운 배경. */
@@ -7,6 +7,51 @@ export const inputCls =
 
 export function Input({ className = "", ...rest }: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...rest} className={`${inputCls} ${className}`} />;
+}
+
+/**
+ * 칸을 벗어나면 저장하는 입력칸 (defaultValue 로 시작하는 비제어 입력).
+ * onCommit 은 값이 마지막으로 저장한 값과 다를 때만 불린다:
+ * - 칸을 벗어날 때(blur), Enter(키보드 "완료")
+ * - 칸에서 벗어나지 않은 채 화면이 사라질 때(뒤로 가기·탭 이동으로 언마운트) — 지워진 요소에는 blur 가 오지 않아서 예전에는 고친 값이 사라졌다
+ * - 앱이 백그라운드로 갈 때(홈 화면으로 나가기, 앱 전환)
+ * 값이 바뀌어 처음부터 다시 그려야 하면 부모가 key 를 바꾼다.
+ */
+export function CommitInput({ defaultValue = "", onCommit, onKeyDown, ...rest }: Omit<InputHTMLAttributes<HTMLInputElement>, "defaultValue" | "value" | "onBlur" | "onChange"> & { defaultValue?: string | number; onCommit: (value: string) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const last = useRef(String(defaultValue));
+  const commitRef = useRef(onCommit);
+  useEffect(() => {
+    commitRef.current = onCommit;
+  });
+  useEffect(() => {
+    const el = ref.current;
+    const flush = () => {
+      if (!el || el.value === last.current) return;
+      last.current = el.value;
+      commitRef.current(el.value);
+    };
+    const onHide = () => document.visibilityState === "hidden" && flush();
+    el?.addEventListener("blur", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      el?.removeEventListener("blur", flush);
+      document.removeEventListener("visibilitychange", onHide);
+      flush();
+    };
+  }, []);
+  return (
+    <input
+      ref={ref}
+      {...rest}
+      defaultValue={defaultValue}
+      onKeyDown={(e) => {
+        onKeyDown?.(e);
+        if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) e.currentTarget.blur();
+      }}
+      className={`${inputCls} ${rest.className ?? ""}`}
+    />
+  );
 }
 
 export function Textarea({ className = "", ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {

@@ -410,6 +410,12 @@ describe("여행 짐 싸기", () => {
     expect(forecastWindow(dates, "2026-11-15")).toEqual({ start: "2026-11-27", end: "2026-11-29" }); // 오늘+14일까지만
     expect(forecastWindow(tripDates("2027-03-01", "2027-03-04"), "2026-11-15")).toBeNull();
     expect(forecastWindow(tripDates("2026-11-10", "2026-11-17"), "2026-11-15")).toEqual({ start: "2026-11-15", end: "2026-11-17" }); // 지난 날은 제외
+    // 경계: 오늘+13·+14 는 예보 요청, +15·+16 은 범위 밖 (Open-Meteo 는 오늘+15 를 넘으면 400)
+    const today = "2026-11-21";
+    expect(forecastWindow(tripDates("2026-12-04", "2026-12-07"), today)).toEqual({ start: "2026-12-04", end: "2026-12-05" });
+    expect(forecastWindow(["2026-12-05"], today)).toEqual({ start: "2026-12-05", end: "2026-12-05" }); // +14
+    expect(forecastWindow(["2026-12-06"], today)).toBeNull(); // +15
+    expect(forecastWindow(["2026-12-07"], today)).toBeNull(); // +16
     const url = new URL(tripForecastUrl(35.68, 139.69, "2026-11-20", "2026-11-23"));
     expect(url.origin + url.pathname).toBe("https://api.open-meteo.com/v1/forecast");
     expect(Object.fromEntries(url.searchParams)).toMatchObject({ start_date: "2026-11-20", end_date: "2026-11-23", timezone: "auto" });

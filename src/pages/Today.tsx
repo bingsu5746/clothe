@@ -159,7 +159,7 @@ export default function Today() {
               value={keywords}
               enterKeyHint="go"
               onChange={(e) => setKeywords(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && !busy && !notEnough && recommend(false)}
+              onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229 && !busy && !notEnough && recommend(false)}
             />
             <div className="mt-3 flex gap-2">
               <Button variant="primary" size="lg" className="flex-1" icon={<SparkIcon size={18} />} loading={busy} onClick={() => recommend(false)} disabled={!loc || notEnough || itemsLoading}>

@@ -4,7 +4,7 @@
  */
 export { Button, ButtonLink, IconButton, Spinner, buttonClass, iconButtonClass } from "./Button";
 export type { ButtonProps, ButtonSize, ButtonVariant, IconButtonProps } from "./Button";
-export { Field, Input, SearchInput, Switch, Textarea, inputCls } from "./Field";
+export { CommitInput, Field, Input, SearchInput, Switch, Textarea, inputCls } from "./Field";
 export { Chip, ChipRow, Segmented } from "./Chip";
 export type { SegmentedOption } from "./Chip";
 export { Badge, Card, Eyebrow, ListGroup, ListRow, Section, Stat } from "./Card";

@@ -145,6 +145,10 @@ export default function ColorDiagnosis() {
     }
   };
 
+  const curPoint = tool === "white" ? white : points[tool];
+  const announce = curPoint
+    ? `${TOOL_LABEL[tool]} 위치 가로 ${Math.round(curPoint.x * 100)}%, 세로 ${Math.round(curPoint.y * 100)}%${tool !== "white" && samples[tool] ? `, 색 ${samples[tool]}` : ""}`
+    : "";
   const markers: { id: Tool; p: Point }[] = [...(mode === "point" && white ? [{ id: "white" as const, p: white }] : []), ...TARGETS.flatMap((t) => (points[t.id] ? [{ id: t.id, p: points[t.id]! }] : []))];
   const count = Object.keys(samples).length;
 
@@ -201,6 +205,10 @@ export default function ColorDiagnosis() {
             <p className="mt-3 flex items-center justify-center gap-1.5 text-footnote text-muted" aria-live="polite">
               <EyedropperIcon size={16} />
               {tool === "white" ? "원래 흰색이나 회색인 곳(종이, 벽, 흰 옷)을 눌러 주세요" : `${TOOL_LABEL[tool]}: ${TARGETS.find((t) => t.id === tool)?.hint}`}
+            </p>
+            {/* 화면 읽기 프로그램: 화살표로 옮길 때마다 지금 위치와 찍힌 색을 읽어 준다 (화면에는 표시 안 함) */}
+            <p className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="tap-announce">
+              {announce}
             </p>
           </div>
 

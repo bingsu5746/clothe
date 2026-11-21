@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { AppEnv, Env } from "../env";
+import type { AppEnv } from "../env";
 import type { ChecklistEntry, Trip, TripDayWeather, TripPlan } from "../../shared/types";
 import { getAllItems, wardrobeSignature, type Row } from "../lib/db";
 import { geminiJson } from "../lib/gemini";
@@ -174,19 +174,38 @@ app.post("/:id/plan", async (c) => {
   const { plan: core, extras } = sanitizeTripPlan(raw, new Set(items.map((i) => i.id)), dates);
   if (!core.capsule_item_ids.length) throw new HttpError(502, "짐 싸기 계획이 비어 있어요. 다시 시도해 주세요.");
   const plan: TripPlan = { ...core, weather, generated_at: new Date().toISOString() };
-  const checklist = buildChecklist(plan.capsule_item_ids, new Map(items.map((i) => [i.id, i.name])), extras, trip.checklist);
-
-  await c.env.DB.prepare(
-    "UPDATE trips SET plan = ?, plan_key = ?, checklist = ?, lat = ?, lon = ?, location_name = ?, updated_at = datetime('now') WHERE id = ?",
-  )
-    .bind(JSON.stringify(plan), key, JSON.stringify(checklist), loc.lat, loc.lon, loc.location_name ?? trip.location_name, id)
-    .run();
-  return c.json({ ...(await getTrip(c.env.DB, id)), cached: false });
+  const names = new Map(items.map((i) => [i.id, i.name]));
+  // AI 를 기다리는 동안(10초 넘게 걸리기도 함) 체크리스트에서 챙김 표시를 바꿨을 수 있으므로, 쓰기 직전의 체크리스트를 기준으로 합친다
+  const saved = await updateChecklist(c.env.DB, id, (current) => buildChecklist(plan.capsule_item_ids, names, extras, current), {
+    sql: "plan = ?, plan_key = ?, lat = ?, lon = ?, location_name = ?",
+    values: [JSON.stringify(plan), key, loc.lat, loc.lon, loc.location_name ?? trip.location_name],
+  });
+  return c.json({ ...saved, cached: false });
 });
 
-async function saveChecklist(env: Env, id: string, checklist: ChecklistEntry[]): Promise<Trip> {
-  await env.DB.prepare("UPDATE trips SET checklist = ?, updated_at = datetime('now') WHERE id = ?").bind(JSON.stringify(checklist), id).run();
-  return getTrip(env.DB, id);
+/**
+ * 체크리스트 읽고-고치고-쓰기를 원자적으로 (비교 후 교체, 실패하면 다시 읽어서 재시도).
+ * 짐을 쌀 때 여러 항목을 빠르게 연달아 체크하면 요청이 동시에 처리되는데, 예전에는 각 요청이 같은 옛 목록을 읽고
+ * 통째로 덮어써서 먼저 누른 체크가 사라졌다(마지막 요청의 체크만 남음).
+ */
+export async function updateChecklist(
+  db: D1Database,
+  id: string,
+  mutate: (current: ChecklistEntry[], trip: Trip) => ChecklistEntry[],
+  extra?: { sql: string; values: (string | number | null)[] },
+): Promise<Trip> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const row = await db.prepare("SELECT * FROM trips WHERE id = ?").bind(id).first<Row>();
+    if (!row) throw new HttpError(404, "여행을 찾을 수 없어요");
+    const trip = rowToTrip(row);
+    const next = mutate(structuredClone(trip.checklist), trip);
+    const res = await db
+      .prepare(`UPDATE trips SET checklist = ?, ${extra ? `${extra.sql}, ` : ""}updated_at = datetime('now') WHERE id = ? AND checklist IS ?`)
+      .bind(JSON.stringify(next), ...(extra?.values ?? []), id, row.checklist ?? null)
+      .run();
+    if ((res.meta?.changes ?? 0) > 0) return getTrip(db, id);
+  }
+  throw new HttpError(409, "체크리스트가 동시에 바뀌고 있어요. 잠시 후 다시 시도해 주세요.");
 }
 
 /** 준비물 직접 추가 (예: 충전기) */
@@ -195,11 +214,13 @@ app.post("/:id/checklist", async (c) => {
   const b = await readJson(c);
   const label = optStr(b, "label", 60, "준비물");
   if (!label) throw new HttpError(400, "준비물 이름을 입력해 주세요");
-  const trip = await getTrip(c.env.DB, id);
-  if (trip.checklist.length >= 150) throw new HttpError(400, "체크리스트 항목이 너무 많아요");
-  if (trip.checklist.some((e) => e.kind === "extra" && e.label === label)) throw new HttpError(409, "이미 있는 준비물이에요");
   const entry: ChecklistEntry = { id: newId(), kind: "extra", item_id: null, label, packed: false, source: "user" };
-  return c.json(await saveChecklist(c.env, id, [...trip.checklist, entry]), 201);
+  const saved = await updateChecklist(c.env.DB, id, (list) => {
+    if (list.length >= 150) throw new HttpError(400, "체크리스트 항목이 너무 많아요");
+    if (list.some((e) => e.kind === "extra" && e.label === label)) throw new HttpError(409, "이미 있는 준비물이에요");
+    return [...list, entry];
+  });
+  return c.json(saved, 201);
 });
 
 /** 체크리스트 항목 고치기: 챙김 표시(packed) / 준비물 이름(label, extra만) */
@@ -209,16 +230,19 @@ app.patch("/:id/checklist/:entryId", async (c) => {
   const b = await readJson(c);
   const packed = optBool(b, "packed");
   const label = optStr(b, "label", 60, "준비물");
-  const trip = await getTrip(c.env.DB, id);
-  const entry = trip.checklist.find((e) => e.id === entryId);
-  if (!entry) throw new HttpError(404, "체크리스트 항목을 찾을 수 없어요");
-  if (packed !== undefined) entry.packed = packed;
-  if (label != null) {
-    if (entry.kind !== "extra") throw new HttpError(400, "옷 항목의 이름은 바꿀 수 없어요");
-    entry.label = label;
-    entry.source = "user";
-  }
-  return c.json(await saveChecklist(c.env, id, trip.checklist));
+  return c.json(
+    await updateChecklist(c.env.DB, id, (list) => {
+      const entry = list.find((e) => e.id === entryId);
+      if (!entry) throw new HttpError(404, "체크리스트 항목을 찾을 수 없어요");
+      if (packed !== undefined) entry.packed = packed;
+      if (label != null) {
+        if (entry.kind !== "extra") throw new HttpError(400, "옷 항목의 이름은 바꿀 수 없어요");
+        entry.label = label;
+        entry.source = "user";
+      }
+      return list;
+    }),
+  );
 });
 
 /** 전체 챙김 표시 한 번에 바꾸기 { packed: boolean } */
@@ -226,18 +250,19 @@ app.put("/:id/checklist", async (c) => {
   const id = paramId(c);
   const packed = optBool(await readJson(c), "packed");
   if (packed === undefined) throw new HttpError(400, "packed: 값이 필요해요");
-  const trip = await getTrip(c.env.DB, id);
-  return c.json(await saveChecklist(c.env, id, trip.checklist.map((e) => ({ ...e, packed }))));
+  return c.json(await updateChecklist(c.env.DB, id, (list) => list.map((e) => ({ ...e, packed }))));
 });
 
 /** 준비물 지우기 (캡슐 옷 항목은 계획을 다시 만들 때만 바뀜) */
 app.delete("/:id/checklist/:entryId", async (c) => {
   const id = paramId(c);
   const entryId = paramId(c, "entryId");
-  const trip = await getTrip(c.env.DB, id);
-  const entry = trip.checklist.find((e) => e.id === entryId);
-  if (!entry) throw new HttpError(404, "체크리스트 항목을 찾을 수 없어요");
-  return c.json(await saveChecklist(c.env, id, trip.checklist.filter((e) => e.id !== entryId)));
+  return c.json(
+    await updateChecklist(c.env.DB, id, (list) => {
+      if (!list.some((e) => e.id === entryId)) throw new HttpError(404, "체크리스트 항목을 찾을 수 없어요");
+      return list.filter((e) => e.id !== entryId);
+    }),
+  );
 });
 
 export default app;

@@ -772,6 +772,48 @@ describe("여행 짐 싸기", () => {
     expect(again.body.checklist.find((e: Json) => e.id === first).packed).toBe(true);
     expect(again.body.checklist.some((e: Json) => e.label === "여권")).toBe(true);
 
+    // 빠르게 연달아 체크(동시 요청): 예전에는 모두 같은 옛 목록을 읽고 덮어써서 마지막 체크만 남았다
+    const ids = again.body.checklist.map((e: Json) => e.id);
+    await call("PUT", `/trips/${trip.id}/checklist`, { packed: false });
+    // 실제 D1 처럼 읽기와 쓰기 사이에 다른 요청이 끼어들 수 있게: 여행을 읽은 뒤 잠깐 쉰다
+    const db = t.env.DB as unknown as { prepare: (sql: string) => object };
+    const realPrepare = db.prepare.bind(db);
+    type Stmt = { bind: (...a: unknown[]) => Stmt; first: () => Promise<unknown> };
+    const slow = (st: Stmt): Stmt =>
+      new Proxy(st, {
+        get(target, prop) {
+          if (prop === "bind") return (...a: unknown[]) => slow(target.bind(...a));
+          if (prop === "first") return async () => (await target.first().then(async (r) => (await new Promise((w) => setTimeout(w, 5)), r)));
+          const v = (target as unknown as Record<string | symbol, unknown>)[prop];
+          return typeof v === "function" ? v.bind(target) : v;
+        },
+      });
+    db.prepare = (sql: string) => (/^SELECT \* FROM trips WHERE id/.test(sql) ? slow(realPrepare(sql) as Stmt) : realPrepare(sql));
+    const burst = await Promise.all(ids.map((eid: string) => patch(`/trips/${trip.id}/checklist/${eid}`, { packed: true })));
+    db.prepare = realPrepare;
+    expect(burst.map((x) => x.status)).toEqual(ids.map(() => 200));
+    expect((await get(`/trips/${trip.id}`)).body.checklist.every((e: Json) => e.packed)).toBe(true);
+
+    // 계획을 다시 만드는 동안(AI 대기) 체크한 것도 남는다
+    await call("PUT", `/trips/${trip.id}/checklist`, { packed: false });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    route({
+      "geocoding-api": () => Response.json({ results: [] }),
+      "api.open-meteo.com": () => Response.json({ daily: { time: [], temperature_2m_max: [], temperature_2m_min: [] } }),
+      generativelanguage: async () => {
+        await gate;
+        return geminiReply({ summary: "다시", capsule_item_ids: [top, bottom], days: [{ day: 1, item_ids: [top, bottom], note: "" }], extras: ["충전기"], tips: [] });
+      },
+    });
+    const regen = post(`/trips/${trip.id}/plan`, { force: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect((await patch(`/trips/${trip.id}/checklist/${first}`, { packed: true })).status).toBe(200);
+    release();
+    const regenerated = await regen;
+    expect(regenerated.status).toBe(200);
+    expect(regenerated.body.checklist.find((e: Json) => e.id === first).packed).toBe(true);
+
     const all = await call("PUT", `/trips/${trip.id}/checklist`, { packed: true });
     expect(all.body.checklist.every((e: Json) => e.packed)).toBe(true);
     const removed = await del(`/trips/${trip.id}/checklist/${passport.id}`);

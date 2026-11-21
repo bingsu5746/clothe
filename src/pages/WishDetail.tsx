@@ -3,7 +3,7 @@ import { useParams } from "react-router";
 import { CATEGORIES, CATEGORY_LABEL, type WishlistItemV2 } from "../../shared/types";
 import { ChevronRightIcon, ExternalIcon, HeartIcon, TrashIcon } from "../components/icons";
 import { ITEM_RATIO } from "../components/items";
-import { Button, Chip, ChipRow, Empty, Field, IconButton, Img, Input, Notice, Page, Skeleton, SkeletonText, buttonClass, confirmDialog, promptDialog, toast } from "../components/ui";
+import { Button, Chip, ChipRow, CommitInput, Empty, Field, IconButton, Img, Notice, Page, Skeleton, SkeletonText, buttonClass, confirmDialog, promptDialog, toast } from "../components/ui";
 import { api, imageUrl, won } from "../lib/api";
 import { ITEMS_PATH, linkError } from "../lib/items";
 import { mutateQuery, revalidate, useQuery } from "../lib/query";
@@ -141,7 +141,7 @@ function WishDetailView({ id }: { id: string }) {
         <div className="min-w-0 space-y-8">
           <section className="space-y-5">
             <Field label="이름">
-              <Input key={w.name} defaultValue={w.name} onBlur={(e) => e.target.value.trim() && e.target.value !== w.name && patch({ name: e.target.value.trim() })} />
+              <CommitInput key={w.name} defaultValue={w.name} enterKeyHint="done" onCommit={(v) => v.trim() && v.trim() !== w.name && patch({ name: v.trim() })} />
             </Field>
             <Field label="카테고리" group>
               <ChipRow wrap>
@@ -154,25 +154,26 @@ function WishDetailView({ id }: { id: string }) {
             </Field>
             <div className="grid gap-5 sm:grid-cols-2 sm:gap-3">
               <Field label="예상 가격 (원)">
-                <Input
+                <CommitInput
                   key={w.estimated_price ?? "none"}
                   inputMode="numeric"
+                  enterKeyHint="done"
                   className="tabular"
                   defaultValue={w.estimated_price != null ? w.estimated_price.toLocaleString("ko-KR") : ""}
                   placeholder="0"
-                  onBlur={(e) => {
-                    const v = e.target.value.replace(/\D/g, "");
+                  onCommit={(raw) => {
+                    const v = raw.replace(/\D/g, "");
                     const next = v ? Number(v) : null;
                     if (next !== w.estimated_price) void patch({ estimated_price: next });
                   }}
                 />
               </Field>
               <Field label="쇼핑몰 링크">
-                <Input key={w.shop_url ?? ""} defaultValue={w.shop_url ?? ""} inputMode="url" autoCapitalize="none" autoCorrect="off" placeholder="https://" onBlur={(e) => {
-                    if (e.target.value === (w.shop_url ?? "")) return;
-                    const bad = linkError(e.target.value, "쇼핑몰 링크");
+                <CommitInput key={w.shop_url ?? ""} defaultValue={w.shop_url ?? ""} inputMode="url" enterKeyHint="done" autoCapitalize="none" autoCorrect="off" placeholder="https://" onCommit={(v) => {
+                    if (v.trim() === (w.shop_url ?? "")) return;
+                    const bad = linkError(v, "쇼핑몰 링크");
                     if (bad) setErr(bad);
-                    else void patch({ shop_url: e.target.value });
+                    else void patch({ shop_url: v.trim() || null });
                   }} />
               </Field>
             </div>

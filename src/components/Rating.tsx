@@ -82,6 +82,9 @@ export function TagEditor({ value, onChange, suggestions = [], label = "태그",
         enterKeyHint="done"
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
+          // 한글 조합 중의 Enter/쉼표는 글자를 확정하는 키다 (macOS·iPad 키보드는 조합 중 Enter 와 확정 뒤 Enter 를 둘 다 보낸다).
+          // 여기서 태그를 만들면 조합 중인 글자가 확정되면서 입력칸에 마지막 글자가 다시 남아, 칸을 벗어날 때 "강" 같은 태그가 하나 더 생겼다.
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (e.key === "Enter" || e.key === ",") {
             e.preventDefault();
             add(draft);

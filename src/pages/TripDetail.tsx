@@ -9,7 +9,7 @@ import { AiOffNotice } from "../components/AiStatus";
 import { api } from "../lib/api";
 import { todayKST, useItems } from "../lib/items";
 import { formatDateTime } from "../lib/profile";
-import { mutateQuery, useQuery } from "../lib/query";
+import { mutateQuery, revalidate, useQuery } from "../lib/query";
 import { AppLink, useGoBack } from "../lib/router";
 import { TRIPS_PATH, dday, nightsLabel, removeTrip, setTrip, shortDate, tripPath } from "../lib/trips";
 
@@ -264,6 +264,9 @@ function DayWeather({ w }: { w: TripDayWeather | undefined }) {
 
 /* ───────── 짐 체크리스트 ───────── */
 
+/** 여행별로 아직 끝나지 않은 체크리스트 요청 */
+const inflight = new Map<string, { count: number; overlapped: boolean }>();
+
 function Checklist({ trip, byId }: { trip: Trip; byId: Map<string, Item> }) {
   const [label, setLabel] = useState("");
   const [adding, setAdding] = useState(false);
@@ -272,16 +275,32 @@ function Checklist({ trip, byId }: { trip: Trip; byId: Map<string, Item> }) {
   const packed = list.filter((c) => c.packed).length;
   const all = list.length > 0 && packed === list.length;
 
-  /** 화면을 먼저 바꾸고 보낸다. 실패하면 되돌린다. */
+  /**
+   * 화면을 먼저 바꾸고 보낸다. 여러 항목을 빠르게 연달아 누르면 요청이 겹치는데, 먼저 온 응답(그 시점의 서버 목록)으로
+   * 화면을 덮으면 방금 누른 체크가 잠깐 풀렸다가 다시 켜진다. 그래서 겹친 동안에는 응답을 쓰지 않고,
+   * 마지막 요청이 끝나면 서버에서 한 번 새로 받는다. 실패하면 서버 상태로 맞춘다.
+   */
   const optimisticTrip = async (next: (t: Trip) => Trip, req: () => Promise<Trip>) => {
-    const before = trip;
+    const path = tripPath(trip.id);
     setErr(null);
-    mutateQuery<Trip>(tripPath(trip.id), next(trip));
+    mutateQuery<Trip>(path, (cur) => (cur ? next(cur) : cur));
+    const state = inflight.get(trip.id) ?? { count: 0, overlapped: false };
+    if (state.count > 0) state.overlapped = true;
+    state.count++;
+    inflight.set(trip.id, state);
+    let result: Trip | null = null;
     try {
-      setTrip(await req());
+      result = await req();
     } catch (e) {
-      mutateQuery<Trip>(tripPath(trip.id), before);
       setErr((e as Error).message);
+      state.overlapped = true; // 실패한 변경은 서버 값으로 되돌린다
+    } finally {
+      state.count--;
+      if (state.count === 0) {
+        inflight.delete(trip.id);
+        if (state.overlapped || !result) void revalidate<Trip>(path).then((t) => t && setTrip(t));
+        else setTrip(result);
+      }
     }
   };
 
