@@ -25,6 +25,18 @@ describe("splitSql / parseAddColumn", () => {
     for (const s of stmts) expect(s).not.toMatch(/\b(DROP|DELETE)\b/i);
   });
 
+  it("0003은 ADD COLUMN 두 개와 예전 콜라주 스크랩 표시 UPDATE 하나뿐이다 (DROP/DELETE 없음)", () => {
+    const stmts = splitSql(readFileSync("migrations/0003_covers.sql", "utf8"));
+    expect(stmts.map(parseAddColumn).filter(Boolean)).toEqual([
+      { table: "outfits", column: "cover_image_key" },
+      { table: "inspirations", column: "kind" },
+    ]);
+    const other = stmts.filter((s) => parseAddColumn(s) === null);
+    expect(other).toHaveLength(1);
+    expect(other[0]).toMatch(/^UPDATE inspirations SET kind = 'collage'/);
+    for (const s of stmts) expect(s).not.toMatch(/\b(DROP|DELETE)\b/i);
+  });
+
   it("ADD COLUMN 문장에서 표/컬럼 이름을 뽑는다", () => {
     expect(parseAddColumn("ALTER TABLE wishlist ADD COLUMN validator_score INTEGER")).toEqual({ table: "wishlist", column: "validator_score" });
     expect(parseAddColumn('alter table "t" add "c" TEXT')).toEqual({ table: "t", column: "c" });
@@ -39,10 +51,11 @@ describe("splitSql / parseAddColumn", () => {
 describe("migrate", () => {
   it("빈 DB: 모든 버전을 적용하고 기록한다", async () => {
     const db = new FakeD1();
-    expect(await migrate(d1(db))).toEqual([1, 2]);
+    expect(await migrate(d1(db))).toEqual([1, 2, 3]);
     expect(db.rows("SELECT version, name FROM schema_migrations ORDER BY version")).toEqual([
       { version: 1, name: "0001_init" },
       { version: 2, name: "0002_features" },
+      { version: 3, name: "0003_covers" },
     ]);
     expect(columns(db, "outfit_logs")).toEqual(expect.arrayContaining(["selfie_key", "rating", "occasion_tags", "note"]));
     expect(columns(db, "wishlist")).toEqual(expect.arrayContaining(["validator_score", "validation", "recommended_links"]));
@@ -53,7 +66,7 @@ describe("migrate", () => {
     const db = new FakeD1();
     await migrate(d1(db));
     expect(await migrate(d1(db))).toEqual([]);
-    expect(db.rows("SELECT COUNT(*) AS n FROM schema_migrations")).toEqual([{ n: 2 }]);
+    expect(db.rows("SELECT COUNT(*) AS n FROM schema_migrations")).toEqual([{ n: 3 }]);
   });
 
   it("운영 DB 시뮬레이션: 0001 표 + 데이터만 있고 schema_migrations가 없어도 데이터를 지키며 올라간다", async () => {
@@ -64,11 +77,25 @@ describe("migrate", () => {
              INSERT INTO outfit_logs (id, worn_date, item_ids) VALUES ('l1', '2026-11-01', '["i1"]');
              INSERT INTO settings (key, value) VALUES ('location', '{"lat":37.5}');`);
 
-    expect(await migrate(d1(db))).toEqual([1, 2]);
+    expect(await migrate(d1(db))).toEqual([1, 2, 3]);
     expect(db.rows("SELECT id, name, wear_count FROM items")).toEqual([{ id: "i1", name: "셔츠", wear_count: 3 }]);
     expect(db.rows("SELECT id, validator_score, recommended_links FROM wishlist")).toEqual([{ id: "w1", validator_score: null, recommended_links: "[]" }]);
     expect(db.rows("SELECT id, selfie_key, occasion_tags FROM outfit_logs")).toEqual([{ id: "l1", selfie_key: null, occasion_tags: "[]" }]);
     expect(db.rows("SELECT value FROM settings")).toEqual([{ value: '{"lat":37.5}' }]);
+  });
+
+  it("0002까지 적용된 운영 DB: 0003이 기존 코디·스크랩을 지키고, 예전 콜라주 스크랩만 collage로 표시한다", async () => {
+    const db = new FakeD1();
+    await migrate(d1(db), MIGRATIONS.slice(0, 2));
+    db.exec(`INSERT INTO outfits (id, name, item_ids) VALUES ('o1', '출근룩', '["i1"]');
+             INSERT INTO inspirations (id, image_key, note) VALUES ('p1', 'img/a.webp', '핀터레스트'), ('c1', 'img/b.webp', '콜라주 보드에서 만든 코디'), ('n1', 'img/c.webp', NULL);`);
+    expect(await migrate(d1(db))).toEqual([3]);
+    expect(db.rows("SELECT id, name, cover_image_key FROM outfits")).toEqual([{ id: "o1", name: "출근룩", cover_image_key: null }]);
+    expect(db.rows("SELECT id, kind FROM inspirations ORDER BY id")).toEqual([
+      { id: "c1", kind: "collage" },
+      { id: "n1", kind: "photo" },
+      { id: "p1", kind: "photo" },
+    ]);
   });
 
   it("마지막 착용일 기준값: 착용 기록으로 설명되지 않는 날짜만 보존한다", async () => {
@@ -88,7 +115,7 @@ describe("migrate", () => {
     const db = new FakeD1();
     db.exec(INIT_SQL);
     db.exec("ALTER TABLE wishlist ADD COLUMN validator_score INTEGER; ALTER TABLE outfit_logs ADD COLUMN note TEXT;");
-    expect(await migrate(d1(db))).toEqual([1, 2]);
+    expect(await migrate(d1(db))).toEqual([1, 2, 3]);
     expect(columns(db, "wishlist").filter((c) => c === "validator_score")).toHaveLength(1);
     expect(columns(db, "wishlist")).toContain("validation_key");
   });

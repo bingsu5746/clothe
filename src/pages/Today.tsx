@@ -3,6 +3,7 @@ import type { DormantItem, Item, Outfit, SimilarLookResult, SuggestedOutfit, Tod
 import { CheckIcon, ChevronRightIcon, CloseIcon, HangerIcon, ImageIcon, LayersIcon, PersonIcon, PinIcon, PlusIcon, RefreshIcon, SparkIcon } from "../components/icons";
 import { ItemImage, OutfitCollage, PhotoInput } from "../components/items";
 import { Badge, Button, ButtonLink, Card, Chip, ChipRow, Empty, Field, IconButton, Img, Input, Notice, Page, Section, Segmented, Skeleton, SkeletonText, Textarea, toast } from "../components/ui";
+import { AiOffNotice } from "../components/AiStatus";
 import { api, uploadImage } from "../lib/api";
 import { createOutfit, useItems, useOutfits, wearItems, wearToast } from "../lib/items";
 import { DEFAULT_LOCATION, type SavedLocation } from "../lib/location";
@@ -132,6 +133,7 @@ export default function Today() {
 
   return (
     <Page title="오늘" eyebrow={todayLabel()}>
+      <AiOffNotice className="mb-6" />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-x-16 gap-y-10 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-10 xl:sticky xl:top-[calc(var(--safe-top)+var(--bar-h)+8px)] xl:self-start">
           <WeatherBlock weather={weather} error={weatherErr} onRetry={() => setWeatherTry((n) => n + 1)} />
@@ -465,11 +467,13 @@ function SimilarLook({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // 업로드 뒤 key만 채워 넣을 때는 같은 주소라서 정리하지 않는다 (주소가 바뀌거나 화면을 떠날 때만)
+  const photoUrl = photo?.blob ? photo.url : null;
   useEffect(
     () => () => {
-      if (photo?.blob) URL.revokeObjectURL(photo.url);
+      if (photoUrl) URL.revokeObjectURL(photoUrl);
     },
-    [photo],
+    [photoUrl],
   );
 
   const ready = !!photo || description.trim().length > 0;

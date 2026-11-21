@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { CATEGORY_LABEL, type Inspiration } from "../../shared/types";
-import { BookmarkIcon, ChevronRightIcon, ExternalIcon, RefreshIcon, SparkIcon, TrashIcon } from "../components/icons";
+import { BookmarkIcon, ChevronRightIcon, HeartIcon, ExternalIcon, RefreshIcon, SparkIcon, TrashIcon } from "../components/icons";
 import { ItemImage } from "../components/items";
 import { Badge, Button, Card, Empty, Eyebrow, IconButton, Img, Notice, Page, Skeleton, SkeletonText, confirmDialog, toast } from "../components/ui";
 import { api, imageUrl } from "../lib/api";
 import { createOutfit, useItems } from "../lib/items";
-import { mutateQuery, useQuery } from "../lib/query";
+import { invalidateQueries, mutateQuery, useQuery } from "../lib/query";
+import { useAiConfigured } from "../lib/status";
+import { AiOffNotice } from "../components/AiStatus";
 import { AppLink, useGoBack, useNav } from "../lib/router";
 
 const LIST_PATH = "/inspirations";
@@ -40,7 +42,9 @@ export default function InspirationDetail() {
     [id, update],
   );
 
-  const needsAnalysis = !!insp && !insp.analysis;
+  const aiConfigured = useAiConfigured();
+  // 콜라주(내가 만든 그림)는 자동 분석하지 않는다. AI 키가 없다고 확인됐으면 부르지 않는다. 상태를 아직 모르면 기다린다.
+  const needsAnalysis = !!insp && !insp.analysis && insp.kind === "photo" && aiConfigured === true;
   useEffect(() => {
     // 처음 열었을 때 분석 결과가 없으면 한 번만 자동으로 분석 (결과는 서버에 저장되어 다시 호출하지 않음)
     if (!needsAnalysis || !id || autoTried.current === id) return;
@@ -75,11 +79,33 @@ export default function InspirationDetail() {
       const next = structuredClone(insp);
       if (next.analysis) next.analysis.pieces[index].wishlist_id = wishlist_id;
       update(next);
-      mutateQuery("/wishlist", () => undefined);
+      invalidateQueries((p) => p === "/wishlist");
       toast("위시리스트에 추가했어요", { action: { label: "보기", onClick: () => nav(`/wishlist/${wishlist_id}`) } });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
+      setBusy(null);
+    }
+  };
+
+  /** 옷장에 비슷한 옷이 없는 piece를 한 번에 위시리스트로 (서버가 구매 링크도 같이 찾아 둔다) */
+  const missingIdx = pieces.flatMap((p, i) => (!p.wishlist_id && !p.matched_item_ids.some((m) => byId.has(m)) ? [i] : []));
+  const addAllMissing = async () => {
+    setBusy("wish-all");
+    const next = structuredClone(insp);
+    let added = 0;
+    try {
+      for (const i of missingIdx) {
+        const { wishlist_id } = await api<{ wishlist_id: string }>(`/inspirations/${insp.id}/pieces/${i}/wishlist`, { method: "POST" });
+        if (next.analysis) next.analysis.pieces[i].wishlist_id = wishlist_id;
+        added++;
+      }
+      toast(`옷장에 없는 ${added}벌을 위시리스트에 담았어요`, { action: { label: "보기", onClick: () => nav("/wishlist") } });
+    } catch (e) {
+      toast.error(added ? `${added}벌만 담았어요: ${(e as Error).message}` : (e as Error).message);
+    } finally {
+      update(next);
+      invalidateQueries((p) => p === "/wishlist");
       setBusy(null);
     }
   };
@@ -162,9 +188,11 @@ export default function InspirationDetail() {
                 {err}
               </Notice>
             ) : (
+              <>
+              <AiOffNotice />
               <Empty
                 icon={<SparkIcon size={26} />}
-                title="아직 분석하지 않았어요"
+                title={insp.kind === "collage" ? "콜라주 보드에서 만든 그림이에요" : "아직 분석하지 않았어요"}
                 className="py-10 md:py-14"
                 action={
                   <Button variant="primary" icon={<SparkIcon size={18} />} onClick={() => analyze()}>
@@ -172,13 +200,19 @@ export default function InspirationDetail() {
                   </Button>
                 }
               >
-                사진 속 옷을 하나씩 나눠서 내 옷장의 비슷한 옷을 찾아 드려요.
+                {insp.kind === "collage" ? "내 옷으로 만든 그림이라 자동으로 분석하지 않았어요. 필요하면 직접 분석할 수 있어요." : "사진 속 옷을 하나씩 나눠서 내 옷장의 비슷한 옷을 찾아 드려요."}
               </Empty>
+              </>
             )
           ) : (
             <>
               {err && <Notice title="다시 분석하지 못했어요">{err}</Notice>}
               <p className="max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2">{insp.analysis.summary}</p>
+              {missingIdx.length > 1 && (
+                <Button block icon={<HeartIcon size={18} />} onClick={addAllMissing} loading={busy === "wish-all"} disabled={!!busy}>
+                  옷장에 없는 {missingIdx.length}벌 모두 위시리스트에 담기
+                </Button>
+              )}
               {pieces.map((p, i) => {
                 const matched = p.matched_item_ids.filter((mid) => byId.has(mid));
                 return (

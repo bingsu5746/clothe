@@ -14,5 +14,6 @@ export default tseslint.config(
     rules: { ...reactHooks.configs.recommended.rules },
   },
   { files: ["public/sw.js"], languageOptions: { globals: globals.serviceworker } },
+  { files: ["test/e2e/**/*.mjs"], languageOptions: { globals: { ...globals.node, ...globals.browser } } },
   { files: ["worker/**/*.ts", "shared/**/*.ts"], languageOptions: { globals: globals.serviceworker } },
 );

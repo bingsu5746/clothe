@@ -27,6 +27,7 @@ const loaders = {
   travel: () => import("./pages/Travel"),
   tripDetail: () => import("./pages/TripDetail"),
   more: () => import("./pages/More"),
+  notFound: () => import("./pages/NotFound"),
 };
 const Today = lazy(loaders.today);
 const Closet = lazy(loaders.closet);
@@ -46,6 +47,7 @@ const OotdCalendar = lazy(loaders.ootdCalendar);
 const OotdNew = lazy(loaders.ootdNew);
 const Travel = lazy(loaders.travel);
 const TripDetail = lazy(loaders.tripDetail);
+const NotFound = lazy(loaders.notFound);
 
 let preloaded = false;
 /** 한가할 때 나머지 화면 코드를 미리 받아 둔다 (탭 전환이 바로 되고, 오프라인에서도 열림) */
@@ -86,7 +88,7 @@ function AppRoutes() {
         <Route path="profile/fitting" element={<FittingRoom />} />
         <Route path="settings" element={<Settings />} />
         <Route path="more" element={<More />} />
-        <Route path="*" element={<Today />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

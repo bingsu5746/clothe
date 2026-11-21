@@ -3,6 +3,7 @@ import type { PurchaseValidation, ShoppingLink, ValidationPart, WishlistItemV2 }
 import { ChevronRightIcon, ExternalIcon, HeartIcon, LinkIcon, PlusIcon, RefreshIcon, SearchIcon, SparkIcon, TrashIcon } from "../../components/icons";
 import { ItemImage, ITEM_RATIO, OutfitCollage } from "../../components/items";
 import { Badge, Button, Card, IconButton, Img, Input, Notice, Section, Skeleton, SkeletonText, promptDialog, toast } from "../../components/ui";
+import { AiOffNotice } from "../../components/AiStatus";
 import { api, won } from "../../lib/api";
 import { linkError, useItems } from "../../lib/items";
 import { formatDateTime } from "../../lib/profile";
@@ -73,6 +74,7 @@ export function Validator({ wish, image, onUpdate }: { wish: Wish; image: string
               판독하기
             </Button>
           </Card>
+          <AiOffNotice className="mt-3" />
           {err && (
             <Notice className="mt-3" title="판독하지 못했어요" action={<Button size="sm" onClick={() => run(false)}>다시 시도</Button>}>
               {err}
@@ -256,10 +258,8 @@ export function ShoppingLinks({ wish, onUpdate }: { wish: Wish; onUpdate: (w: Wi
       const r = await api<{ query: string; source: "naver" | "links"; notice: string | null; recommended_links: ShoppingLink[] }>(`/wishlist/${wish.id}/links`, { method: "POST", json: query.trim() ? { query: query.trim() } : {} });
       setNotice(r.notice);
       setQuery(r.query);
-      // 검색은 링크 목록을 덮어쓰므로, 직접 추가해 둔 링크는 다시 붙여 저장한다
-      const keep = custom.filter((c) => !r.recommended_links.some((l) => l.url === c.url));
-      if (keep.length) await save([...r.recommended_links, ...keep]);
-      else onUpdate({ ...wish, recommended_links: r.recommended_links });
+      // 서버가 직접 추가한 링크(custom)는 남기고 검색 링크만 바꿔서 돌려준다
+      onUpdate({ ...wish, recommended_links: r.recommended_links });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -268,18 +268,28 @@ export function ShoppingLinks({ wish, onUpdate }: { wish: Wish; onUpdate: (w: Wi
   };
 
   const addCustom = async () => {
-    const url = await promptDialog({ title: "구매 링크 추가", message: "상품 페이지 주소를 붙여 넣어 주세요.", placeholder: "https://", inputMode: "url", confirmLabel: "다음" });
-    if (!url) return;
-    const bad = linkError(url, "링크") ?? (url.trim() ? null : "주소를 넣어 주세요");
+    const input = await promptDialog({ title: "구매 링크 추가", message: "상품 페이지 주소를 붙여 넣어 주세요.", placeholder: "https://", inputMode: "url", confirmLabel: "다음" });
+    if (!input?.trim()) return;
+    // "musinsa.com/..."처럼 https:// 없이 붙여 넣어도 받는다 (서버는 http(s) 주소만 저장)
+    const raw = input.trim();
+    const url = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+    const host = (() => {
+      try {
+        return new URL(url).hostname.replace(/^www\./, "");
+      } catch {
+        return null;
+      }
+    })();
+    const bad = linkError(url, "링크") ?? (host ? null : "링크: 주소 형식이 올바르지 않아요");
     if (bad) {
       toast.error(bad);
       return;
     }
-    const title = await promptDialog({ title: "링크 이름", defaultValue: new URL(url.trim()).hostname.replace(/^www\./, ""), confirmLabel: "추가", allowEmpty: true });
+    const title = await promptDialog({ title: "링크 이름", defaultValue: host ?? "", confirmLabel: "추가", allowEmpty: true });
     if (title === null) return;
     setBusy("add");
     try {
-      await save([...links, { title: title.trim() || url.trim(), url: url.trim(), source: "custom", price: null, image_url: null, mall: null }]);
+      await save([...links, { title: title.trim() || url, url, source: "custom", price: null, image_url: null, mall: null }]);
       toast("링크를 저장했어요");
     } catch (e) {
       toast.error((e as Error).message);

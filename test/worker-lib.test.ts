@@ -17,7 +17,19 @@ describe("parseProductHtml", () => {
       price: 129000,
       image_url: "https://shop.example.com/img/a.jpg",
       url: "https://shop.example.com/p/1",
+      category: "outer",
     });
+  });
+
+  it("카테고리: 빵부스러기·JSON-LD category가 상품명보다 우선하고, 모르면 null", () => {
+    const crumbs = `<script type="application/ld+json">{"@type":"BreadcrumbList","itemListElement":[{"name":"홈"},{"name":"여성"},{"item":{"name":"원피스"}}]}</script>
+      <script type="application/ld+json">{"@type":"Product","name":"셔츠 칼라 롱 드레스"}</script>`;
+    expect(parseProductHtml(crumbs, "https://a.com/").category).toBe("dress");
+    const ld = `<script type="application/ld+json">{"@type":"Product","name":"데일리 아이템","category":["의류","하의","슬랙스"]}</script>`;
+    expect(parseProductHtml(ld, "https://a.com/").category).toBe("bottom");
+    expect(parseProductHtml(`<meta property="og:title" content="후드 집업 그레이">`, "https://a.com/").category).toBe("outer");
+    expect(parseProductHtml(`<meta property="og:title" content="Leather Chelsea Boots">`, "https://a.com/").category).toBe("shoes");
+    expect(parseProductHtml(`<meta property="og:title" content="베스트 상품 모음">`, "https://a.com/").category).toBeNull();
   });
 
   it("JSON-LD가 없으면 OpenGraph 메타태그를 쓴다", () => {

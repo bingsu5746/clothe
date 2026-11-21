@@ -7,7 +7,7 @@ import { Badge, Button, ButtonLink, Card, Empty, Img, Notice, Page, Section, Seg
 import { ApiError, api, imageUrl, uploadImage } from "../lib/api";
 import { useItems } from "../lib/items";
 import { patchProfile, useProfile } from "../lib/profile";
-import { mutateQuery, useQuery } from "../lib/query";
+import { invalidateQueries, mutateQuery, useQuery } from "../lib/query";
 
 type Tab = "tryon" | "collage";
 const STATUS_PATH = "/tryon/status";
@@ -141,7 +141,9 @@ function TryOnPanel({ info, mannequins, profileLoading }: { info: TryOnAvailabil
       } catch (e) {
         if (stop) return;
         if (e instanceof ApiError && e.status === 404) {
+          // 다른 기기에서 지운 작업: 기록에서도 빼야 다시 지켜보지 않는다
           setJob(null);
+          mutateQuery<TryOn[]>(HISTORY_PATH, (cur) => cur?.filter((x) => x.id !== activeId));
           return;
         }
       }
@@ -166,10 +168,14 @@ function TryOnPanel({ info, mannequins, profileLoading }: { info: TryOnAvailabil
       setJob(t);
       setNow(Date.now());
       mutateQuery<TryOn[]>(HISTORY_PATH, (cur) => (cur ? [t, ...cur] : cur));
+      // 쇼핑몰 주소로만 사진이 있던 위시리스트 옷은 서버가 사진을 가져와 저장해 둔다 → 목록을 새로 받는다
+      if (garment.kind === "wish") invalidateQueries((p) => p === "/wishlist");
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setStarting(false);
+      // 모바일: 진행 상황·오류가 보이는 피팅 카드로 올라간다
+      if (!window.matchMedia("(min-width: 1024px)").matches) document.getElementById("tryon-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
 
@@ -286,10 +292,24 @@ function TryOnPanel({ info, mannequins, profileLoading }: { info: TryOnAvailabil
             </div>
           )}
         </Section>
+
+        {!running(active) && !(job?.status === "succeeded" && job.result_image_key) && (
+          <div className="sticky bottom-[calc(var(--bottom-inset)+12px)] z-10 lg:hidden">
+            <div className="flex items-center gap-3 rounded-lg bg-surface py-2.5 pr-2.5 pl-4 shadow-2">
+              <span className="min-w-0 flex-1">
+                <span className="block text-caption text-muted">{personKey ? "입혀 볼 옷" : "전신 사진을 먼저 골라 주세요"}</span>
+                <span className={`block truncate text-subhead font-medium ${garmentLabel ? "" : "text-muted"}`}>{garmentLabel ?? "옷을 골라 주세요"}</span>
+              </span>
+              <Button variant="primary" icon={<SparkIcon size={18} />} loading={starting} disabled={!personKey || !garment} onClick={start}>
+                피팅 시작
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="min-w-0 space-y-8 lg:sticky lg:top-[calc(var(--safe-top)+var(--bar-h)+8px)] lg:self-start">
-        <Card>
+        <Card id="tryon-card" className="scroll-mt-[calc(var(--safe-top)+var(--bar-h)+8px)]">
           <h2 className="text-headline">피팅</h2>
           <p className="mt-0.5 text-subhead text-muted">
             {info.provider === "replicate" ? "Replicate" : "Gemini"} · {info.model}
@@ -339,9 +359,12 @@ function TryOnPanel({ info, mannequins, profileLoading }: { info: TryOnAvailabil
                 <span className={`min-w-0 truncate ${garmentLabel ? "" : "text-muted"}`}>{garmentLabel ?? "입혀 볼 옷을 골라 주세요"}</span>
               </div>
               <Notice>{err}</Notice>
-              <Button variant="primary" size="lg" block icon={<SparkIcon size={18} />} loading={starting} disabled={!personKey || !garment} onClick={start}>
-                피팅 시작
-              </Button>
+              {/* 모바일은 옷 목록 아래 고정 바에 같은 버튼이 있다 */}
+              <div className="hidden lg:block">
+                <Button variant="primary" size="lg" block icon={<SparkIcon size={18} />} loading={starting} disabled={!personKey || !garment} onClick={start}>
+                  피팅 시작
+                </Button>
+              </div>
             </div>
           )}
         </Card>

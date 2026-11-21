@@ -3,6 +3,7 @@ import { BODY_TYPE_LABEL, UNDERTONE_LABEL, type BodyAnalysis, type ColorAnalysis
 import { CheckIcon, CloseIcon, EyedropperIcon, ImageIcon, PersonIcon, PlusIcon, RefreshIcon, ShirtIcon, SparkIcon, TrashIcon } from "../components/icons";
 import { PhotoInput } from "../components/items";
 import { Badge, Button, ButtonLink, Card, Eyebrow, Field, Img, Input, ListGroup, ListRow, Notice, Page, Section, Sheet, Skeleton, SkeletonText, confirmDialog, toast } from "../components/ui";
+import { AiOffNotice } from "../components/AiStatus";
 import { api, imageUrl, uploadImage } from "../lib/api";
 import { readableOn } from "../lib/color";
 import { useIsWide } from "../lib/hooks";
@@ -17,6 +18,7 @@ export default function Profile() {
 
   return (
     <Page title="프로필" back={wide ? undefined : MORE_PATH} large subtitle="퍼스널 컬러와 체형을 알아 두면 코디 추천과 살까 말까 판독에 반영돼요.">
+      <AiOffNotice className="mb-6" />
       {loading ? (
         <div role="status" aria-label="불러오는 중" className="grid gap-10 xl:grid-cols-2">
           <div className="space-y-4">

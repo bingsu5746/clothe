@@ -5,6 +5,7 @@ import { CheckIcon, PencilIcon, PinIcon, PlusIcon, RefreshIcon, SparkIcon, Suitc
 import { ItemImage, OutfitCollage } from "../components/items";
 import { TripForm } from "../components/TripForm";
 import { Badge, Button, Card, Empty, IconButton, Input, Notice, Page, Section, Skeleton, SkeletonText, confirmDialog, toast } from "../components/ui";
+import { AiOffNotice } from "../components/AiStatus";
 import { api } from "../lib/api";
 import { todayKST, useItems } from "../lib/items";
 import { formatDateTime } from "../lib/profile";
@@ -94,6 +95,7 @@ function TripView({ id }: { id: string }) {
         </>
       }
     >
+      <AiOffNotice className="mb-6" />
       <div className="mb-8 flex flex-wrap items-center gap-x-4 gap-y-1 text-subhead text-muted">
         <span className="inline-flex items-center gap-1">
           <PinIcon size={16} /> {trip.location_name ?? trip.destination}

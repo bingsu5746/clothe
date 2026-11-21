@@ -4,6 +4,7 @@ import { CATEGORY_LABEL, type Item, type OotdAnalysis, type OutfitLog } from "..
 import { CameraIcon, CheckIcon, ImageIcon, PlusIcon, RefreshIcon, SelfieIcon, SparkIcon } from "../components/icons";
 import { ItemImage, ItemPicker, PhotoInput } from "../components/items";
 import { Badge, Button, ButtonLink, Card, Eyebrow, Field, Img, Input, Notice, Page, Section, Skeleton, SkeletonText, Textarea, buttonClass, toast } from "../components/ui";
+import { AiOffNotice } from "../components/AiStatus";
 import { api, uploadImage } from "../lib/api";
 import { todayKST, useItems } from "../lib/items";
 import { Rating, TagEditor } from "../components/Rating";
@@ -119,6 +120,7 @@ export default function OotdNew() {
   if (phase === "pick" || !photo)
     return (
       <Page title="OOTD 기록" back="/outfits/calendar" width="narrow">
+        <AiOffNotice className="mx-auto mb-4 max-w-md" />
         <div className="mx-auto max-w-md pt-4 text-center">
           <div className="mx-auto grid size-16 place-items-center rounded-full bg-surface-2 text-ink-2">
             <SelfieIcon size={30} />

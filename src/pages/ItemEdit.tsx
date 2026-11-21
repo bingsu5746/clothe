@@ -9,6 +9,8 @@ import { useIsWide, useStoredFlag } from "../lib/hooks";
 import { composeCutout } from "../lib/image";
 import { cpw, patchItemInCache, removeItemFromCache, linkError, useItems, wearItems, wearToast } from "../lib/items";
 import { useQuery } from "../lib/query";
+import { useAiConfigured } from "../lib/status";
+import { AiOffNotice } from "../components/AiStatus";
 import { useGoBack, useNav } from "../lib/router";
 
 /** 화면에서 고치는 값 (색·태그는 쉼표로 구분한 글자로 다룬다) */
@@ -82,6 +84,7 @@ function ItemEditor({ id }: { id: string | undefined }) {
   const [bgOn, setBgOn] = useStoredFlag(BG_KEY);
   /** 이번 화면에서 고른 원본 사진 (배경 제거를 켜고 끌 때 다시 처리하려고 보관) */
   const original = useRef<Blob | null>(null);
+  const aiConfigured = useAiConfigured();
 
   useEffect(() => () => {
     if (preview) URL.revokeObjectURL(preview);
@@ -112,13 +115,14 @@ function ItemEditor({ id }: { id: string | undefined }) {
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
 
-  const applyTagging = (t: ItemTagging, keepName?: string | null) =>
+  const applyTagging = (t: ItemTagging, keepName?: string | null, keepCategory?: Item["category"] | null) =>
     setForm((f) =>
       f
         ? {
             ...f,
             name: keepName || f.name || t.name,
-            category: t.category,
+            // 쇼핑몰 분류로 알아낸 카테고리가 있으면 그쪽이 더 정확하다
+            category: keepCategory ?? t.category,
             sub_category: t.sub_category ?? f.sub_category,
             colors: (t.colors ?? []).join(", "),
             material: t.material ?? f.material,
@@ -130,11 +134,11 @@ function ItemEditor({ id }: { id: string | undefined }) {
         : f,
     );
 
-  const analyze = async (key: string, keepName?: string | null) => {
+  const analyze = async (key: string, keepName?: string | null, keepCategory?: Item["category"] | null) => {
     setBusy({ kind: "analyze", label: "AI가 옷을 살펴보는 중" });
     setAiErr(null);
     try {
-      applyTagging(await api<ItemTagging>("/items/analyze", { method: "POST", json: { image_key: key } }), keepName);
+      applyTagging(await api<ItemTagging>("/items/analyze", { method: "POST", json: { image_key: key } }), keepName, keepCategory);
     } catch (e) {
       setAiErr((e as Error).message);
     }
@@ -164,7 +168,8 @@ function ItemEditor({ id }: { id: string | undefined }) {
       setBusy({ kind: "upload", label: "사진 올리는 중" });
       const key = await uploadImage(final);
       set("image_key", key);
-      await analyze(key);
+      // AI 키가 없다고 확인됐으면 부르지 않는다 (사진만 저장, 정보는 직접 입력)
+      if (aiConfigured !== false) await analyze(key);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -190,8 +195,12 @@ function ItemEditor({ id }: { id: string | undefined }) {
       const p = await api<UrlImport & { image_key: string | null }>("/items/import-url", { method: "POST", json: { url } });
       original.current = null;
       setPreview(null);
-      setForm((f) => (f ? { ...f, name: p.name ?? f.name, brand: p.brand ?? f.brand, purchase_price: p.price ?? f.purchase_price, image_key: p.image_key ?? f.image_key, original_shop_url: url } : f));
-      if (p.image_key) await analyze(p.image_key, p.name);
+      setForm((f) =>
+        f
+          ? { ...f, name: p.name ?? f.name, brand: p.brand ?? f.brand, category: p.category ?? f.category, purchase_price: p.price ?? f.purchase_price, image_key: p.image_key ?? f.image_key, original_shop_url: url }
+          : f,
+      );
+      if (p.image_key && aiConfigured !== false) await analyze(p.image_key, p.name, p.category);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -321,6 +330,7 @@ function ItemEditor({ id }: { id: string | undefined }) {
           </div>
 
           <div className="mt-3 space-y-2">
+            <AiOffNotice />
             <Notice tone="info">{bgNotice}</Notice>
             {aiErr && (
               <Notice

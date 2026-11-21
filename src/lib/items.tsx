@@ -111,7 +111,7 @@ export function wearToast(r: WearResult) {
 /**
  * 코디 저장. 목록에는 바로 나타나고, 서버가 준 진짜 값으로 바꿔 끼운다.
  */
-export async function createOutfit(body: { name: string; item_ids: string[]; source?: Outfit["source"]; reason?: string | null; tags?: string[] }): Promise<Outfit> {
+export async function createOutfit(body: { name: string; item_ids: string[]; source?: Outfit["source"]; reason?: string | null; tags?: string[]; cover_image_key?: string | null }): Promise<Outfit> {
   const temp: Outfit = {
     id: `temp-${Date.now()}`,
     name: body.name,
@@ -119,6 +119,7 @@ export async function createOutfit(body: { name: string; item_ids: string[]; sou
     source: body.source ?? "manual",
     reason: body.reason ?? null,
     tags: body.tags ?? [],
+    cover_image_key: body.cover_image_key ?? null,
     created_at: new Date().toISOString(),
   };
   const hadList = peekQuery<Outfit[]>(OUTFITS_PATH) !== undefined;

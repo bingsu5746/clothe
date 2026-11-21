@@ -3,7 +3,8 @@ import type { Outfit } from "../../shared/types";
 import { LayersIcon, PlusIcon } from "../components/icons";
 import { OutfitsTabs } from "../components/OutfitsTabs";
 import { ItemPicker, OutfitCollage } from "../components/items";
-import { Button, ButtonLink, Card, Empty, IconButton, Notice, Page, Skeleton, promptDialog, toast } from "../components/ui";
+import { Button, ButtonLink, Card, Empty, IconButton, Img, Notice, Page, Skeleton, promptDialog, toast } from "../components/ui";
+import { imageUrl } from "../lib/api";
 import { createOutfit, useItems, useOutfits } from "../lib/items";
 import { AppLink, useNav } from "../lib/router";
 
@@ -95,7 +96,7 @@ export default function Outfits() {
                   <p className="mb-4 text-footnote text-muted">
                     {SOURCE_LABEL[o.source]} · {o.item_ids.length}벌
                   </p>
-                  <OutfitCollage ids={o.item_ids} />
+                  <OutfitCollage ids={o.item_ids} extra={o.cover_image_key ? <Img src={imageUrl(o.cover_image_key)} ratio="3 / 4" alt="콜라주 그림" className="rounded-sm shadow-[0_0_0_1px_var(--line)]" /> : undefined} />
                 </Card>
               </AppLink>
             );

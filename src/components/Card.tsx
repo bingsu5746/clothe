@@ -3,8 +3,8 @@ import { AppLink } from "../lib/router";
 import { ChevronRightIcon } from "./icons";
 
 /** 내용을 담는 면. 테두리 대신 아주 옅은 선 + 표면색. */
-export function Card({ children, className = "", as: Tag = "section", padded = true }: { children: ReactNode; className?: string; as?: ElementType; padded?: boolean }) {
-  return <Tag className={`rounded-lg bg-surface shadow-[0_0_0_1px_var(--line)] ${padded ? "p-4 md:p-5" : ""} ${className}`}>{children}</Tag>;
+export function Card({ children, className = "", as: Tag = "section", padded = true, id }: { children: ReactNode; className?: string; as?: ElementType; padded?: boolean; id?: string }) {
+  return <Tag id={id} className={`rounded-lg bg-surface shadow-[0_0_0_1px_var(--line)] ${padded ? "p-4 md:p-5" : ""} ${className}`}>{children}</Tag>;
 }
 
 /** 화면 안의 한 구역: 제목 줄(오른쪽에 동작) + 내용 */

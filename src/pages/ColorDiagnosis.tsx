@@ -3,6 +3,7 @@ import type { ColorSamples, Profile } from "../../shared/types";
 import { CameraIcon, CheckIcon, EyedropperIcon, ImageIcon, SparkIcon } from "../components/icons";
 import { PhotoInput } from "../components/items";
 import { Button, Card, Notice, Page, Segmented, Spinner, buttonClass, toast } from "../components/ui";
+import { AiOffNotice } from "../components/AiStatus";
 import { api, uploadImage } from "../lib/api";
 import { NO_GAINS, applyGains, blobToCanvas, grayWorldGains, sampleRgb, toHex, whitePointGains, type Gains } from "../lib/color";
 import { encodeCanvas } from "../lib/image";
@@ -149,6 +150,7 @@ export default function ColorDiagnosis() {
 
   return (
     <Page title="퍼스널 컬러 진단" back="/profile" width="default">
+      <AiOffNotice className="mx-auto mb-6 max-w-xl" />
       {!original || !corrected ? (
         <div className="mx-auto max-w-xl space-y-6">
           <Card>

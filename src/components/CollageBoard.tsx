@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
-import type { Inspiration, Item, WishlistItemV2 } from "../../shared/types";
-import { api, imageUrl, uploadImage } from "../lib/api";
+import type { Item, WishlistItemV2 } from "../../shared/types";
+import { imageUrl, uploadImage } from "../lib/api";
+import { deleteCutout, loadCutouts, saveCutout } from "../lib/cutouts";
 import { encodeCanvas } from "../lib/image";
 import { createOutfit, useItems } from "../lib/items";
-import { mutateQuery, useQuery } from "../lib/query";
+import { useQuery } from "../lib/query";
 import { useNav } from "../lib/router";
 import { Button, IconButton } from "./Button";
 import { Empty, Notice } from "./Feedback";
@@ -18,8 +19,8 @@ import { ArrowDownIcon, ArrowUpIcon, CheckIcon, DownloadIcon, HangerIcon, HeartI
  * 2D 콜라주 보드: 전신 사진(또는 무지 배경) 위에 옷 사진을 올려 끌고, 크기를 바꾸고, 앞뒤 순서를 바꾼다.
  * - 손가락/마우스: 끌어서 이동, 오른쪽 아래 손잡이로 크기, 두 손가락으로 확대·축소
  * - 키보드: 옷에 포커스 → 화살표 이동(Shift 크게), +/- 크기, [ ] 순서, R 회전, Delete 삭제, Esc 선택 해제
- * - 저장: 캔버스로 그려 업로드(스크랩에 보관) 또는 기기에 저장, 옷장 옷은 코디로도 저장
- * 배치는 이 기기(localStorage)에 기억해 둔다.
+ * - 저장: "코디로 저장"은 옷장 옷 목록 + 이 그림(대표 사진, outfits.cover_image_key)을 함께 저장, "기기에 저장"은 그림 파일만
+ * 배치는 이 기기(localStorage)에, 배경을 지운 사진은 이 기기(IndexedDB, lib/cutouts.ts)에 기억해 둔다.
  */
 
 export interface Layer {
@@ -128,7 +129,7 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
   const [picking, setPicking] = useState<"item" | "wish" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  /** 배경을 지운 사진 (이 화면에서만 유지: 기기 메모리) */
+  /** 배경을 지운 사진 (image key → object URL). 이 기기의 IndexedDB에서 불러오고 저장한다. */
   const [cutouts, setCutouts] = useState<Map<string, string>>(() => new Map());
   const boardRef = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
@@ -153,6 +154,31 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
   const cutoutUrls = useRef<string[]>([]);
   useEffect(() => () => cutoutUrls.current.forEach((u) => URL.revokeObjectURL(u)), []);
 
+  // 이 기기에 저장해 둔 배경 지운 사진을 되살린다 (다시 열었을 때, 같은 옷을 다시 올렸을 때)
+  const alive = useRef(true);
+  const restoreCutouts = useCallback(async (keys: string[]) => {
+    const found = await loadCutouts([...new Set(keys)]);
+    if (!alive.current || !found.size) return;
+    setCutouts((m) => {
+      const next = new Map(m);
+      found.forEach((blob, key) => {
+        if (next.has(key)) return;
+        const url = URL.createObjectURL(blob);
+        cutoutUrls.current.push(url);
+        next.set(key, url);
+      });
+      return next;
+    });
+  }, []);
+  const initialKeys = useRef(state.layers.map((l) => l.key));
+  useEffect(() => {
+    alive.current = true;
+    void restoreCutouts(initialKeys.current);
+    return () => {
+      alive.current = false;
+    };
+  }, [restoreCutouts]);
+
   const srcOf = useCallback((l: Layer) => cutouts.get(l.key) ?? imageUrl(l.key)!, [cutouts]);
   const update = (id: string, patch: Partial<Layer> | ((l: Layer) => Partial<Layer>)) =>
     setState((s) => ({ ...s, layers: s.layers.map((l) => (l.id === id ? { ...l, ...(typeof patch === "function" ? patch(l) : patch) } : l)) }));
@@ -175,6 +201,7 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
     const added: Layer[] = entries.map((e, i) => ({ ...e, id: uid(), x: clamp(0.38 + (i % 3) * 0.12, 0.15, 0.85), y: clamp(0.3 + Math.floor(i / 3) * 0.18 + (i % 3) * 0.04, 0.15, 0.85), w: 0.42, rot: 0 }));
     setState((s) => ({ ...s, layers: [...s.layers, ...added] }));
     setSelected(added[added.length - 1].id);
+    void restoreCutouts(added.map((l) => l.key));
   };
 
   /* ───── 손가락·마우스 ───── */
@@ -270,7 +297,8 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
       const url = URL.createObjectURL(cut);
       cutoutUrls.current.push(url);
       setCutouts((m) => new Map(m).set(l.key, url));
-      toast("배경을 지웠어요. 이 화면을 닫으면 원래 사진으로 돌아가요");
+      void saveCutout(l.key, cut);
+      toast("배경을 지웠어요. 이 기기에 기억해 둘게요");
     } catch (e) {
       console.warn("배경 제거 실패", e);
       toast.error("배경을 지우지 못했어요. 원래 사진을 그대로 쓸게요");
@@ -279,23 +307,18 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
     }
   };
 
+  /** 배경 지운 사진을 버리고 원래 사진으로 */
+  const restoreOriginal = (l: Layer) => {
+    setCutouts((m) => {
+      const next = new Map(m);
+      next.delete(l.key);
+      return next;
+    });
+    void deleteCutout(l.key);
+  };
+
   /* ───── 저장 ───── */
   const exportBlob = async () => encodeCanvas(await renderBoard({ ...state, bg }, srcOf), 0.88);
-
-  const saveToScrap = async () => {
-    setBusy("scrap");
-    setErr(null);
-    try {
-      const key = await uploadImage(await exportBlob());
-      const insp = await api<Inspiration>("/inspirations", { method: "POST", json: { image_key: key, note: "콜라주 보드에서 만든 코디" } });
-      mutateQuery<Inspiration[]>("/inspirations", (cur) => (cur ? [insp, ...cur] : cur));
-      toast("스크랩에 저장했어요", { action: { label: "보기", onClick: () => nav(`/inspo/${insp.id}`) } });
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const saveToDevice = async () => {
     setBusy("device");
@@ -331,8 +354,11 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
     const name = await promptDialog({ title: "코디 이름", defaultValue: "콜라주 코디", confirmLabel: "저장" });
     if (name === null) return;
     setBusy("outfit");
+    setErr(null);
     try {
-      const o = await createOutfit({ name: name || "콜라주 코디", item_ids: itemIds, source: "manual", tags: ["콜라주"] });
+      // 보드 그림을 코디의 대표 사진으로 같이 저장한다
+      const cover = await uploadImage(await exportBlob());
+      const o = await createOutfit({ name: name || "콜라주 코디", item_ids: itemIds, source: "manual", tags: ["콜라주"], cover_image_key: cover });
       toast("코디를 저장했어요", { action: { label: "보기", onClick: () => nav(`/outfits/${o.id}`) } });
     } catch (e) {
       toast.error((e as Error).message);
@@ -393,7 +419,7 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
             );
           })}
           {state.layers.length === 0 && (
-            <div className="pointer-events-none absolute inset-x-6 bottom-6 rounded-md bg-black/55 px-4 py-3 text-center text-subhead text-white backdrop-blur-sm">아래에서 옷을 골라 보드에 올려 보세요</div>
+            <div className="pointer-events-none absolute inset-x-6 bottom-6 rounded-md bg-black/55 px-4 py-3 text-center text-subhead text-white backdrop-blur-sm">옷장이나 위시리스트에서 옷을 골라 보드에 올려 보세요</div>
           )}
         </div>
         <p id="collage-help" className="mt-3 text-center text-footnote text-muted">
@@ -416,9 +442,15 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
             <IconButton label="15도 돌리기" variant="filled" onClick={() => update(sel.id, (l) => ({ rot: (l.rot + 15) % 360 }))}>
               <RotateIcon size={18} />
             </IconButton>
-            <IconButton label="배경 지우기" variant="filled" loading={busy === `cut-${sel.id}`} disabled={cutouts.has(sel.key) || !!busy} onClick={() => cutout(sel)}>
-              <WandIcon size={18} />
-            </IconButton>
+            {cutouts.has(sel.key) ? (
+              <IconButton label="원래 사진으로" variant="filled" disabled={!!busy} onClick={() => restoreOriginal(sel)}>
+                <RotateIcon size={18} className="-scale-x-100" />
+              </IconButton>
+            ) : (
+              <IconButton label="배경 지우기" variant="filled" loading={busy === `cut-${sel.id}`} disabled={!!busy} onClick={() => cutout(sel)}>
+                <WandIcon size={18} />
+              </IconButton>
+            )}
             <IconButton label="보드에서 빼기" variant="filled" className="text-danger" onClick={() => remove(sel.id)}>
               <TrashIcon size={18} />
             </IconButton>
@@ -520,15 +552,14 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
           <Button variant="primary" size="lg" block icon={<LayersIcon size={18} />} disabled={itemIds.length === 0 || !!busy} loading={busy === "outfit"} onClick={saveOutfit}>
             코디로 저장
           </Button>
-          <div className="grid grid-cols-2 gap-2">
-            <Button disabled={state.layers.length === 0 || !!busy} loading={busy === "scrap"} onClick={saveToScrap}>
-              스크랩에 저장
-            </Button>
-            <Button icon={<DownloadIcon size={18} />} disabled={state.layers.length === 0 || !!busy} loading={busy === "device"} onClick={saveToDevice}>
-              기기에 저장
-            </Button>
-          </div>
-          <p className="text-footnote text-muted">코디로 저장하면 옷장 옷만 묶여요(위시리스트 옷은 빠져요). 그림은 스크랩이나 기기에 저장돼요.</p>
+          <Button block icon={<DownloadIcon size={18} />} disabled={state.layers.length === 0 || !!busy} loading={busy === "device"} onClick={saveToDevice}>
+            그림을 기기에 저장
+          </Button>
+          <p className="text-footnote text-muted">
+            {state.layers.length > 0 && itemIds.length === 0
+              ? "옷장 옷을 하나 이상 올리면 코디로 저장할 수 있어요. 위시리스트 옷만 있는 보드는 그림으로만 저장돼요."
+              : "코디로 저장하면 옷장 옷 목록과 이 그림이 함께 저장돼요(위시리스트 옷은 그림에만 남아요)."}
+          </p>
         </section>
       </div>
 

@@ -123,7 +123,7 @@ describe("인증 / 공통 오류 형식", () => {
 
   it("첫 요청에서 스키마 마이그레이션이 적용된다", async () => {
     await get("/items");
-    expect(t.db.rows("SELECT version FROM schema_migrations ORDER BY version")).toEqual([{ version: 1 }, { version: 2 }]);
+    expect(t.db.rows("SELECT version FROM schema_migrations ORDER BY version")).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
   });
 });
 
@@ -926,6 +926,25 @@ describe("가상 피팅", () => {
   });
 });
 
+describe("가상 피팅: 쇼핑몰 사진만 있는 위시리스트 옷", () => {
+  it("사진을 R2로 가져와 위시리스트에도 저장하고 피팅을 시작한다, 못 가져오면 422로 이유를 알린다", async () => {
+    t.env.TRYON_PROVIDER = "gemini";
+    await putImage("img/person.webp");
+    const w = (await post("/wishlist", { name: "니트", category: "top", image_url: "https://shop.example.com/knit.jpg" })).body.id;
+    route({ "shop.example.com/knit.jpg": () => new Response(imageBytes("jpeg", 64), { headers: { "content-type": "image/jpeg" } }) });
+    const start = await post("/tryon", { wish_id: w, person_image_key: "img/person.webp" });
+    expect(start.status).toBe(202);
+    expect(start.body.garment_image_key).toMatch(/^img\/.+\.jpeg$/);
+    expect((await get(`/wishlist/${w}`)).body.image_key).toBe(start.body.garment_image_key);
+
+    const w2 = (await post("/wishlist", { name: "코트", category: "outer", image_url: "https://shop.example.com/blocked.jpg" })).body.id;
+    route({ "shop.example.com/blocked.jpg": () => new Response("no", { status: 403 }) });
+    const blocked = await post("/tryon", { wish_id: w2, person_image_key: "img/person.webp" });
+    expect(blocked.status).toBe(422);
+    expect(blocked.body.error).toContain("가져오지 못했어요");
+  });
+});
+
 describe("스크랩 / 단축어", () => {
   it("스크랩 분석: 없는 id 제거, piece를 위시리스트로", async () => {
     await putImage("img/ref.webp");
@@ -958,6 +977,91 @@ describe("스크랩 / 단축어", () => {
     expect(await ok.json()).toMatchObject({ ok: true, type: "inspiration" });
     expect((await send({ "x-shortcut-token": "shortcut-token", "content-type": "application/json" }, JSON.stringify({ url: "http://127.0.0.1/x" }))).status).toBe(400);
     expect((await send({ "x-shortcut-token": "shortcut-token", "content-type": "application/json" }, "[]")).status).toBe(400);
+  });
+});
+
+describe("검수 1회차 추가", () => {
+  it("GET /status: 켜짐/꺼짐만 알려 주고 시크릿 값은 내려주지 않는다", async () => {
+    t = makeEnv({ GEMINI_API_KEY: "g-secret-value", NAVER_CLIENT_ID: "nid", NAVER_CLIENT_SECRET: "nsecret-value", REPLICATE_API_TOKEN: "" });
+    const r = await get("/status");
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ ai: { configured: true, model: "gemini-flash-latest" }, shopping: { naver_enabled: true }, shortcut: { configured: true }, tryon: { available: false } });
+    const text = JSON.stringify(r.body);
+    for (const secret of ["g-secret-value", "nsecret-value", "nid", "shortcut-token", TEST_SECRET]) expect(text).not.toContain(secret);
+    t = makeEnv({ SHORTCUT_TOKEN: "" });
+    expect((await get("/status")).body).toMatchObject({ ai: { configured: false }, shortcut: { configured: false }, shopping: { naver_enabled: false } });
+    cookie = "";
+    expect((await get("/status")).status).toBe(401);
+  });
+
+  it("구매 링크 다시 찾기: 직접 추가한 링크는 남기고 검색 링크만 바꾼다", async () => {
+    const w = (await post("/wishlist", { name: "울 코트" })).body.id;
+    await patch(`/wishlist/${w}`, { recommended_links: [{ title: "내 링크", url: "https://shop.example.com/mine" }, { title: "예전 검색", url: "https://old.example.com/s", source: "naver_search" }] });
+    const r = await post(`/wishlist/${w}/links`, { query: "울 코트" });
+    expect(r.status).toBe(200);
+    const sources = r.body.recommended_links.map((l: Json) => l.source);
+    expect(sources).toEqual(["naver_search", "musinsa_search", "29cm_search", "custom"]);
+    expect(r.body.recommended_links.some((l: Json) => l.url === "https://old.example.com/s")).toBe(false);
+    expect((await get(`/wishlist/${w}`)).body.recommended_links.find((l: Json) => l.source === "custom").url).toBe("https://shop.example.com/mine");
+  });
+
+  it("코디 대표 사진: 저장·변경·삭제 때 안 쓰는 그림만 정리한다", async () => {
+    const top = await addItem();
+    await putImage("img/cover1.webp");
+    await putImage("img/cover2.webp");
+    const o = await post("/outfits", { item_ids: [top], cover_image_key: "img/cover1.webp" });
+    expect(o.status).toBe(201);
+    expect(o.body.cover_image_key).toBe("img/cover1.webp");
+    expect((await post("/outfits", { item_ids: [top], cover_image_key: "javascript:1" })).status).toBe(400);
+    const p = await patch(`/outfits/${o.body.id}`, { cover_image_key: "img/cover2.webp" });
+    expect(p.body.cover_image_key).toBe("img/cover2.webp");
+    expect(t.bucket.objects.has("img/cover1.webp")).toBe(false);
+    expect((await patch("/outfits/nope", { name: "x" })).status).toBe(404);
+    await del(`/outfits/${o.body.id}`);
+    expect(t.bucket.objects.has("img/cover2.webp")).toBe(false);
+    // 코디가 쓰는 그림은 옷을 지워도 남는다
+    await putImage("img/shared.webp");
+    const item = await addItem({ image_key: "img/shared.webp" });
+    await post("/outfits", { item_ids: [top], cover_image_key: "img/shared.webp" });
+    await del(`/items/${item}`);
+    expect(t.bucket.objects.has("img/shared.webp")).toBe(true);
+  });
+
+  it("스크랩 kind: 기본 photo, collage도 받는다", async () => {
+    await putImage("img/k.webp");
+    expect((await post("/inspirations", { image_key: "img/k.webp" })).body.kind).toBe("photo");
+    expect((await post("/inspirations", { image_key: "img/k.webp", kind: "collage" })).body.kind).toBe("collage");
+    expect((await post("/inspirations", { image_key: "img/k.webp", kind: "x" })).status).toBe(400);
+  });
+
+  it("체형 진단은 진단한 사진을 body_image_key로 저장한다", async () => {
+    await putImage("img/body.webp");
+    route({ generativelanguage: () => geminiReply({ body_type: "wave", proportions: "p", features: [], fit_tips: [], avoid: [], confidence: "high", caveat: "" }) });
+    const r = await post("/profile/analyze-body", { image_key: "img/body.webp" });
+    expect(r.status).toBe(200);
+    expect(r.body.body_image_key).toBe("img/body.webp");
+    expect(r.body.body_analysis.image_key).toBe("img/body.webp");
+  });
+
+  it("단축어 target=closet: 상품 링크를 옷장에 바로 등록 (카테고리 추정, AI 실패해도 저장)", async () => {
+    cookie = "";
+    const html = `<meta property="og:title" content="코튼 와이드 팬츠"><meta property="og:image" content="https://shop.example.com/i.jpg"><meta property="product:price:amount" content="49000">`;
+    route({
+      "shop.example.com/p": () => new Response(html, { headers: { "content-type": "text/html" } }),
+      "shop.example.com/i.jpg": () => new Response(imageBytes("jpeg", 40), { headers: { "content-type": "image/jpeg" } }),
+      generativelanguage: () => new Response("{}", { status: 500 }),
+    });
+    const res = await app.request(
+      "http://localhost/api/webhook/shortcut",
+      { method: "POST", headers: { "x-shortcut-token": "shortcut-token", "content-type": "application/json" }, body: JSON.stringify({ url: "https://shop.example.com/p/1", target: "closet" }) },
+      t.env,
+    );
+    const body = (await res.json()) as Json;
+    expect(body).toMatchObject({ ok: true, type: "item" });
+    cookie = await sessionCookie();
+    const item = (await get(`/items/${body.id}`)).body;
+    expect(item).toMatchObject({ name: "코튼 와이드 팬츠", category: "bottom", purchase_price: 49000, original_shop_url: "https://shop.example.com/p/1" });
+    expect(item.image_key).toMatch(/^img\//);
   });
 });
 

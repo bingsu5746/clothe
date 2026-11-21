@@ -3,8 +3,8 @@ import { useParams } from "react-router";
 import { CATEGORY_LABEL, type Item, type Outfit } from "../../shared/types";
 import { LayersIcon, PencilIcon, TrashIcon } from "../components/icons";
 import { ItemImage, ItemPicker } from "../components/items";
-import { Button, Empty, Eyebrow, IconButton, Notice, Page, SkeletonGrid, confirmDialog, promptDialog, toast } from "../components/ui";
-import { api } from "../lib/api";
+import { Button, Empty, Eyebrow, IconButton, Img, Notice, Page, SkeletonGrid, confirmDialog, promptDialog, toast } from "../components/ui";
+import { api, imageUrl } from "../lib/api";
 import { OUTFITS_PATH, useItems, useOutfits, wearItems, wearToast } from "../lib/items";
 import { mutateQuery, optimistic } from "../lib/query";
 import { AppLink, useGoBack } from "../lib/router";
@@ -80,7 +80,8 @@ export default function OutfitDetail() {
 
   const wear = async () => {
     try {
-      toast(wearToast(await wearItems(outfit.item_ids, { outfit_id: outfit.id })));
+      // 옷장에서 지운 옷은 빼고 기록한다 (서버는 없는 옷이 섞이면 400)
+      toast(wearToast(await wearItems(items.map((i) => i.id), { outfit_id: outfit.id })));
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -103,6 +104,11 @@ export default function OutfitDetail() {
         </>
       }
     >
+      {outfit.cover_image_key && (
+        <a href={imageUrl(outfit.cover_image_key)!} target="_blank" rel="noreferrer" className="mb-6 block w-full max-w-[260px] md:mb-8">
+          <Img src={imageUrl(outfit.cover_image_key)} ratio="3 / 4" loading="eager" alt={`${outfit.name} 콜라주`} className="rounded-lg shadow-[0_0_0_1px_var(--line)]" />
+        </a>
+      )}
       {outfit.reason && <p className="mb-6 max-w-prose border-l-2 border-ink pl-4 text-body text-ink-2 md:mb-8">{outfit.reason}</p>}
 
       {items.length === 0 ? (
@@ -139,6 +145,10 @@ export default function OutfitDetail() {
           doneLabel="로 바꾸기"
           onDone={(ids) => {
             setEditing(false);
+            if (!ids.length) {
+              toast("옷을 하나 이상 골라 주세요");
+              return;
+            }
             void patch({ item_ids: ids });
           }}
         />

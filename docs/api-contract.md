@@ -42,7 +42,7 @@
 
 ### DB 스키마 업그레이드 (런타임 마이그레이션)
 
-배포 때 마이그레이션 명령을 돌리지 않습니다. Worker가 첫 요청에서 `worker/lib/migrate.ts`로 `migrations/000N_*.sql`을 순서대로 적용하고 `schema_migrations(version, name, applied_at)` 표에 기록합니다. 한 버전은 D1 batch(트랜잭션) 하나로 적용되어 실패하면 통째로 되돌려집니다. `ALTER TABLE … ADD COLUMN`은 컬럼이 이미 있으면 건너뜁니다. 버전 1(0001)은 전부 `IF NOT EXISTS`라 기존 운영 DB에서는 아무것도 바꾸지 않습니다. **`wrangler d1 migrations apply`는 쓰지 마세요.**
+버전: 1 `0001_init`, 2 `0002_features`, 3 `0003_covers`(코디 `cover_image_key`, 스크랩 `kind` + 예전 콜라주 스크랩 표시). 배포 때 마이그레이션 명령을 돌리지 않습니다. Worker가 첫 요청에서 `worker/lib/migrate.ts`로 `migrations/000N_*.sql`을 순서대로 적용하고 `schema_migrations(version, name, applied_at)` 표에 기록합니다. 한 버전은 D1 batch(트랜잭션) 하나로 적용되어 실패하면 통째로 되돌려집니다. `ALTER TABLE … ADD COLUMN`은 컬럼이 이미 있으면 건너뜁니다. 버전 1(0001)은 전부 `IF NOT EXISTS`라 기존 운영 DB에서는 아무것도 바꾸지 않습니다. **`wrangler d1 migrations apply`는 쓰지 마세요.**
 
 ---
 
@@ -129,7 +129,8 @@
 
 ### `POST /items/import-url` → `UrlImport & { image_key: string|null }`
 - 요청: `{ "url": "https://…" }` (공개 http(s)만. localhost·사설 IP는 400)
-- 응답: `{ name, brand, price, image_url, url, image_key }`
+- 응답: `{ name, brand, price, image_url, url, category, image_key }`
+- `category`: 상품 페이지의 분류 글(JSON-LD `BreadcrumbList` → JSON-LD `Product.category` → `product:category` 메타 → 상품명 순서)에서 키워드로 추정한 `Category`, 모르면 `null`. 화면은 이 값을 AI 태깅보다 우선합니다.
 - 오류: 400 URL, 502 `"페이지를 불러오지 못했어요 (403)"` 등
 
 ### `POST /items/wear` (예전 엔드포인트, 계속 지원) → `WearResult = { ok: true, log_id: string, duplicate: boolean, worn_date: "YYYY-MM-DD", items: Item[] }`
@@ -211,22 +212,28 @@
 
 ## 6. 저장한 코디 `Outfit`
 
+`Outfit = { id, name, item_ids[], source, reason, tags[], cover_image_key: string|null, created_at }` — `cover_image_key`는 피팅룸 콜라주 보드에서 만든 그림(대표 사진). 없으면 `null`.
+
 ### `GET /outfits` → `Outfit[]`
 ### `GET /outfits/{id}` → `Outfit` | 404 `"코디를 찾을 수 없어요"`
 ### `POST /outfits` → 201 `Outfit`
-- 요청: `{ item_ids: string[] (1~30, 필수), name?: string ≤80 (기본 "내 코디"), source?: "manual"|"ai"|"reference", reason?: ≤1000, tags?: string[] ≤15 }`
-- 오류: 400 `"옷을 하나 이상 골라 주세요"`
-### `PATCH /outfits/{id}` → `Outfit` (`name`, `item_ids`(빈 배열 불가), `tags`)
-### `DELETE /outfits/{id}` → `{ "ok": true }`
+- 요청: `{ item_ids: string[] (1~30, 필수), name?: string ≤80 (기본 "내 코디"), source?: "manual"|"ai"|"reference", reason?: ≤1000, tags?: string[] ≤15, cover_image_key?: 이미지 key }`
+- 오류: 400 `"옷을 하나 이상 골라 주세요"`, 대표 사진 key 형식
+### `PATCH /outfits/{id}` → `Outfit` (`name`, `item_ids`(빈 배열 불가), `tags`, `cover_image_key`(`null`이면 지움)) | 404
+- 대표 사진을 바꾸거나 지우면 예전 그림은 다른 곳에서 안 쓸 때만 R2에서 정리
+### `DELETE /outfits/{id}` → `{ "ok": true }` (대표 사진도 같은 규칙으로 정리)
 
 ---
 
 ## 7. 스크랩(레퍼런스 코디 사진) `Inspiration`
 
+`Inspiration = { id, kind: "photo"|"collage", image_key, source_url, note, analysis, created_at }`
+- `kind`: `photo` = 밖에서 가져온 코디 사진(화면이 처음 열 때 자동 분석), `collage` = 예전 버전이 콜라주 보드 그림을 스크랩으로 저장한 것(자동 분석하지 않음, 직접 누르면 분석). 마이그레이션 3이 메모 `"콜라주 보드에서 만든 코디"`인 기존 행을 `collage`로 표시합니다. 지금 콜라주는 코디의 `cover_image_key`로 저장됩니다.
+
 ### `GET /inspirations` → `Inspiration[]`
 ### `GET /inspirations/{id}` → `Inspiration` | 404 `"저장한 코디 사진을 찾을 수 없어요"`
 ### `POST /inspirations` → 201 `Inspiration`
-- 요청: `{ image_key (필수), source_url?: ≤2000, note?: ≤500 }`
+- 요청: `{ image_key (필수), source_url?: ≤2000, note?: ≤500, kind?: "photo"|"collage" (기본 photo) }`
 ### `PATCH /inspirations/{id}` → `Inspiration`
 - `{ note?, source_url? }` — 예전 동작 그대로 `null`/빈 값은 "바꾸지 않음"
 ### `DELETE /inspirations/{id}` → `{ "ok": true }`
@@ -234,6 +241,7 @@
 - 이미 분석돼 있으면 그대로 돌려줌. piece당 `matched_item_ids` 최대 3개(옷장에 있는 id만). 다시 분석해도 piece별 `wishlist_id`는 유지.
 - 오류: 422 옷을 못 찾음, AI 오류
 ### `POST /inspirations/{id}/pieces/{index}/wishlist` → 201 `{ wishlist_id }` (이미 추가됐으면 200 같은 값)
+- 추가한 위시리스트 항목의 `recommended_links`도 바로 채웁니다(`/wishlist/{id}/links`와 같은 검색, piece 설명 + 색). 링크 찾기가 실패해도 추가는 성공.
 - 오류: 400 `"먼저 사진을 분석해 주세요"`(분석 없음/없는 index)
 
 ---
@@ -250,9 +258,9 @@
 ### `POST /wishlist` → 201 `WishlistItemV2`
 - 요청: `{ name? ≤200 (기본 "이름 없는 옷"), category?, description? ≤1000, colors?, estimated_price? (정수 ≥0), image_key?, image_url? ≤2000, shop_url? ≤2000 }`
 ### `POST /wishlist/from-url` → 201 `WishlistItemV2`
-- 요청 `{ url }` → 상품 페이지에서 이름/가격/사진을 가져와 추가. 오류 400 URL, 502 페이지 실패.
+- 요청 `{ url }` → 상품 페이지에서 이름/가격/사진/카테고리(추정)를 가져와 추가. 오류 400 URL, 502 페이지 실패.
 ### `PATCH /wishlist/{id}` → `WishlistItemV2`
-- 위 필드 + `status: "wanted"|"bought"|"dropped"` + `recommended_links: ShoppingLink[]`(직접 편집; http(s) URL만 남김, 최대 20개, `source` 생략 시 `"custom"`)
+- 위 필드 + `status: "wanted"|"bought"|"dropped"` + `recommended_links: ShoppingLink[]`(직접 편집; http(s) URL만 남김, 최대 30개, `source` 생략 시 `"custom"`)
 ### `DELETE /wishlist/{id}` → `{ "ok": true }`
 
 ### `POST /wishlist/{id}/combos[?force=true]` (AI, 예전 그대로) → `WishCombos`
@@ -286,7 +294,7 @@
 
 ### `POST /wishlist/{id}/links` → `{ query, source: "naver"|"links", notice: string|null, recommended_links: ShoppingLink[] }`
 - 요청(선택): `{ "query"?: string ≤100 }` — 없으면 위시 이름으로 검색하고, 이름에 들어 있지 않은 첫 번째 색을 앞에 붙임 (예: 이름 "울 코트" + 색 ["카멜"] → `"카멜 울 코트"`)
-- 네이버 API 결과(최대 5개, `source: "naver_item"`) + 검색 링크 3개를 `recommended_links`에 **덮어써서** 저장. 본문 없이 보내도 됨.
+- 네이버 API 결과(최대 5개, `source: "naver_item"`) + 검색 링크 3개로 **검색 링크만 바꾸고**, 직접 추가한 링크(`source: "custom"`)는 뒤에 그대로 남겨 저장합니다(같은 URL이 새 결과에 있으면 하나만). 응답의 `recommended_links`가 저장된 전체 목록입니다. 본문 없이 보내도 됨.
 
 ### `POST /wishlist/{id}/bought` → 201 `{ item_id, item: Item }` (이미 샀으면 200 `{ item_id }`)
 - 요청(선택): `{ purchase_price?: 정수 ≥0 }` (없으면 `estimated_price`)
@@ -352,6 +360,7 @@
 
 ### `POST /profile/analyze-body` (AI) → `Profile & { cached: boolean }`
 - 요청(모두 선택): `{ image_key?: 전신 사진 (없으면 body_image_key → mannequin_images[0]), force?: boolean }`
+- 같은 사진으로 이미 진단했으면 다시 부르지 않음(`cached: true`), `force: true`면 다시. **성공(또는 캐시) 시 `body_image_key`도 진단한 그 사진으로 바뀝니다**(퍼스널 컬러의 `face_image_key`와 같은 규칙). 예전 `body_image_key` 사진은 마네킹 등 다른 곳에서 안 쓰면 정리됩니다.
 - 결과 `BodyAnalysis`: `body_type (straight|wave|natural)`, `body_type_label`, `proportions`, `features[]`, `fit_tips[]`, `avoid[]`, `confidence`, `caveat`, `image_key`, `analyzed_at`. 키/몸무게가 있으면 프롬프트에 포함.
 - 오류: 400 `"전신 사진을 먼저 올려 주세요"`, 404, 502, AI 오류
 
@@ -403,7 +412,8 @@
 - 요청: 입힐 옷은 셋 중 **정확히 하나**: `item_id` | `wish_id` | `garment_image_key`. 선택: `person_image_key`(없으면 프로필 `mannequin_images[0]` → `body_image_key`), `category`(없으면 옷의 카테고리), `description` ≤200.
 - Replicate는 상의·아우터·하의·원피스만 지원(신발/가방/액세서리는 400). Gemini는 모든 종류.
 - 응답: `{ id, status: "processing"(replicate) | "queued"(gemini), provider, model, person_image_key, garment_image_key, garment_item_id, garment_wish_id, category, result_image_key: null, error: null, created_at, updated_at }`
-- 오류: 503 `reason`(꺼져 있음), 400 옷 선택/사진 없음/`"전신 사진을 먼저 등록해 주세요…"`, 404, 502 Replicate 키/결제 오류(기록 남기지 않음), 429
+- `wish_id`인데 위시리스트에 쇼핑몰 이미지 주소(`image_url`)만 있으면 서버가 그 사진을 R2로 가져와 위시리스트 `image_key`에도 저장한 뒤 씁니다. 가져오지 못하면(사이트 차단 등) 422 `"쇼핑몰에서 이 옷 사진을 가져오지 못했어요…"`.
+- 오류: 503 `reason`(꺼져 있음), 400 옷 선택/사진 없음/`"전신 사진을 먼저 등록해 주세요…"`, 404, 422 위 경우, 502 Replicate 키/결제 오류(기록 남기지 않음), 429
 
 ### `GET /tryon/{id}` → `TryOn` (폴링: 2~3초 간격 권장)
 - `succeeded`면 `result_image_key`(`tryon/<id>.png` 등) → `/api/images/{key}`로 표시. `failed`면 `error`에 한국어 이유.
@@ -414,7 +424,18 @@
 
 ---
 
-## 14. 설정
+## 14. 연결 상태 / 설정
+
+### `GET /status` → `AppStatus`
+```json
+{ "ai": { "configured": false, "model": "gemini-flash-latest" },
+  "tryon": { "available": false, "provider": null, "model": null, "reason": "…", "setup_hint": "…" },
+  "shopping": { "naver_enabled": false },
+  "shortcut": { "configured": true } }
+```
+- 시크릿은 있는지 없는지만 알려 주고 값은 절대 내려주지 않습니다. `tryon`은 `GET /tryon/status`와 같은 값, `shopping`은 `GET /shopping/status`와 같은 값.
+- 설정 화면의 "연결 상태"와, AI 버튼 근처의 "AI 기능이 아직 연결되지 않았어요" 안내가 씁니다(`ai.configured: false`일 때만 보임, 스크랩 자동 분석도 하지 않음).
+
 
 ### `GET /settings` → `{ [key]: any }` (로그인 잠금 정보 제외)
 ### `PUT /settings/{key}` → `{ "ok": true }`
@@ -426,8 +447,10 @@
 
 ### `POST /webhook/shortcut` (헤더 `X-Shortcut-Token`)
 - 본문: `multipart/form-data`(`file`, `url`, `target`, `note`) / JSON `{ url, target?, note? }` / 이미지 바이트(`Content-Type: image/*`) / 텍스트(안의 첫 URL)
-- `target`: `"inspiration"` | `"wishlist"` (생략 시: 이미지 → 스크랩, 인스타/핀터레스트 등 → 스크랩, 그 밖의 URL → 위시리스트)
-- 응답: `{ ok: true, type: "inspiration"|"wishlist", id, message }`
+- `target`: `"inspiration"` | `"wishlist"` | `"closet"`(`"item"`도 같은 뜻) (생략 시: 이미지 → 스크랩, 인스타/핀터레스트 등 → 스크랩, 그 밖의 URL → 위시리스트)
+- `closet`: 옷장에 바로 등록. 상품 링크면 이름·브랜드·가격·카테고리(추정)·사진을, `GEMINI_API_KEY`가 있으면 사진 AI 태깅(색·소재·핏·계절·보온성, 이미지별 캐시)을 씁니다. AI가 실패해도 저장하고, 카테고리를 끝내 모르면 `top`으로 넣고 메모에 "카테고리를 확인해 주세요"를 남깁니다.
+- 위시리스트로 갈 때도 상품 페이지에서 추정한 `category`를 채웁니다. 사진과 함께 온 `url`은 공개 http(s) 주소일 때만 출처로 남깁니다.
+- 응답: `{ ok: true, type: "inspiration"|"wishlist"|"item", id, message }`
 - 오류: 401 토큰, 400 이미지/URL 없음(사설 IP 포함), 422 링크에서 사진을 못 가져옴
 
 ---

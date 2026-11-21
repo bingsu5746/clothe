@@ -136,6 +136,7 @@ async function resolveGarment(env: Env, b: Record<string, unknown>): Promise<Gar
       key = await saveRemoteImage(env.BUCKET, wish.image_url);
       if (key) await env.DB.prepare("UPDATE wishlist SET image_key = ? WHERE id = ?").bind(key, wish.id).run();
     }
+    if (!key && wish.image_url) throw new HttpError(422, "쇼핑몰에서 이 옷 사진을 가져오지 못했어요 (사이트가 막았을 수 있어요). 사진을 저장해서 위시리스트에 직접 올려 주세요.");
     if (!key) throw new HttpError(400, "이 위시리스트 항목에는 사진이 없어서 가상 피팅을 할 수 없어요");
     return { image_key: key, item_id: null, wish_id: wish.id, category: wish.category, description: wish.name };
   }
