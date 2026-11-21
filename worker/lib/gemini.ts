@@ -77,6 +77,12 @@ export function parseGeminiJsonResponse(status: number, body: unknown): unknown 
   }
 }
 
+export const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
+
+export function geminiModel(env: Pick<Env, "GEMINI_MODEL">): string {
+  return env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
+}
+
 export function requireGeminiKey(env: Env): string {
   if (!env.GEMINI_API_KEY) {
     throw new HttpError(503, "GEMINI_API_KEY가 설정되지 않았어요. Cloudflare 대시보드에서 시크릿을 추가해 주세요.");
@@ -93,7 +99,7 @@ export async function geminiJson(env: Env, prompt: string, schema: Schema, image
   const key = requireGeminiKey(env);
   const total = images.reduce((n, img) => n + img.data.byteLength, 0);
   if (total > GEMINI_INLINE_TOTAL_MAX_BYTES) throw new HttpError(413, "사진이 너무 커서 AI에 보낼 수 없어요. 더 작은 사진으로 다시 시도해 주세요.");
-  const model = env.GEMINI_MODEL || "gemini-flash-latest";
+  const model = geminiModel(env);
   const res = await fetchWithRetry(
     geminiUrl(model),
     {

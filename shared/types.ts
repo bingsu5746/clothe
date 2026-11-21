@@ -43,6 +43,8 @@ export interface Outfit {
   source: "manual" | "ai" | "reference";
   reason: string | null;
   tags: string[];
+  /** 대표 사진 (피팅룸 콜라주 보드에서 만든 그림). 없으면 null → 옷 사진 묶음으로 보여 준다 (2026-11-16 추가) */
+  cover_image_key: string | null;
   created_at: string;
 }
 
@@ -61,6 +63,8 @@ export interface InspirationAnalysis {
 
 export interface Inspiration {
   id: string;
+  /** photo = 밖에서 가져온 코디 사진(열면 자동 분석), collage = 예전 버전에서 콜라주 보드로 만든 그림(자동 분석 안 함) */
+  kind: "photo" | "collage";
   image_key: string;
   source_url: string | null;
   note: string | null;
@@ -120,6 +124,8 @@ export interface UrlImport {
   price: number | null;
   image_url: string | null;
   url: string;
+  /** 상품 페이지의 분류(JSON-LD category, 빵부스러기, 상품명)로 추정한 카테고리. 모르면 null (2026-11-16 추가) */
+  category: Category | null;
 }
 
 // ───────────────────────── 아래는 2차 기능에서 추가된 타입 (기존 타입은 그대로) ─────────────────────────
@@ -446,4 +452,14 @@ export interface WearResult {
   worn_date: string;
   /** 이 기록에 들어 있는 옷의 갱신된 상태 (wear_count, last_worn_date 포함) */
   items: Item[];
+}
+
+/** GET /status: 선택·외부 기능이 켜져 있는지 (시크릿 값은 절대 내려주지 않음) */
+export interface AppStatus {
+  /** Gemini (옷 태깅, 코디 추천, 진단, 판독, OOTD 매칭 등 모든 AI 기능) */
+  ai: { configured: boolean; model: string };
+  tryon: TryOnAvailability;
+  shopping: { naver_enabled: boolean };
+  /** iOS 단축어 webhook (SHORTCUT_TOKEN) */
+  shortcut: { configured: boolean };
 }

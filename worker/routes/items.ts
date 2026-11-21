@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { AppEnv } from "../env";
+import type { AppEnv, Env } from "../env";
 import { SEASONS, type ItemTagging } from "../../shared/types";
 import { cacheGet, cachePut, getAllItems, rowToItem, type Row } from "../lib/db";
 import { findDormantItems } from "../lib/dormant";
@@ -63,18 +63,23 @@ app.get("/dormant", async (c) => {
   return c.json(findDormantItems(items, todayKST(), 50));
 });
 
+/** 사진 한 장의 옷 정보 태깅 (Gemini). 결과는 이미지별로 D1에 캐시해서 같은 사진은 다시 부르지 않는다. */
+export async function tagItemImage(env: Env, imageKey: string): Promise<ItemTagging> {
+  const cacheKey = `tag:${imageKey}`;
+  const cached = await cacheGet(env.DB, cacheKey);
+  if (isRecord(cached) && typeof cached.name === "string") return sanitizeTagging(cached);
+  const img = await loadImage(env, imageKey);
+  const tagging = sanitizeTagging(await geminiJson(env, taggingPrompt(), TAGGING_SCHEMA, [img], 0.3));
+  await cachePut(env.DB, cacheKey, tagging);
+  return tagging;
+}
+
 /** 사진으로 옷 정보 자동 태깅 (결과는 이미지별로 캐시) */
 app.post("/analyze", async (c) => {
   const b = await readJson(c);
   const image_key = optImageKey(b, "image_key", "사진");
   if (!image_key) throw new HttpError(400, "image_key가 필요해요");
-  const cacheKey = `tag:${image_key}`;
-  const cached = await cacheGet(c.env.DB, cacheKey);
-  if (isRecord(cached) && typeof cached.name === "string") return c.json(sanitizeTagging(cached));
-  const img = await loadImage(c.env, image_key);
-  const tagging = sanitizeTagging(await geminiJson(c.env, taggingPrompt(), TAGGING_SCHEMA, [img], 0.3));
-  await cachePut(c.env.DB, cacheKey, tagging);
-  return c.json(tagging);
+  return c.json(await tagItemImage(c.env, image_key));
 });
 
 export function sanitizeTagging(raw: unknown): ItemTagging {

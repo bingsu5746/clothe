@@ -1,4 +1,4 @@
-import type { UrlImport } from "../../shared/types";
+import type { Category, UrlImport } from "../../shared/types";
 import { sameImageFamily, sniffImageType } from "./images";
 import { isPublicHttpUrl, readBodyLimited, safeFetch } from "./util";
 
@@ -29,9 +29,59 @@ function toPrice(v: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
+/**
+ * 상품 분류 글(빵부스러기, JSON-LD category, 상품명)에서 옷 카테고리를 추정한다. 모르면 null.
+ * 앞에 있는 규칙이 먼저 이긴다: "니트 원피스" → 원피스, "후드 집업" → 아우터, "데님 자켓" → 아우터.
+ * 한글은 부분 문자열, 영어는 단어 단위로 찾는다. 헷갈리기 쉬운 말("베스트"=best, "힐링", "플랫폼")은 넣지 않았다.
+ */
+const CATEGORY_RULES: [Category, RegExp][] = [
+  ["dress", /원피스|드레스|점프수트|\b(?:dress(?:es)?|jumpsuits?|one-?piece)\b/i],
+  ["outer", /아우터|자켓|재킷|코트|패딩|점퍼|블루종|가디건|카디건|집업|바람막이|야상|무스탕|조끼|블레이저|아노락|\b(?:outer(?:wear)?|jackets?|coats?|parkas?|cardigans?|blazers?|puffers?|vests?|windbreakers?|anoraks?|zip-?ups?)\b/i],
+  ["shoes", /신발|스니커즈|운동화|구두|로퍼|부츠|샌들|슬리퍼|슈즈|\b(?:shoes?|sneakers?|boots?|loafers?|sandals?|slippers?|heels|mules?)\b/i],
+  ["bag", /가방|백팩|토트백|크로스백|숄더백|클러치|에코백|\b(?:bags?|backpacks?|totes?|clutch(?:es)?|handbags?)\b/i],
+  ["bottom", /바지|팬츠|슬랙스|청바지|스커트|치마|쇼츠|반바지|레깅스|조거|하의|\b(?:pants|trousers|jeans|skirts?|shorts|leggings|slacks|joggers|bottoms?)\b/i],
+  ["top", /티셔츠|셔츠|블라우스|니트|스웨터|맨투맨|후드|후디|나시|슬리브리스|폴로|터틀넥|상의|\b(?:t-?shirts?|tees?|shirts?|blouses?|knit(?:wear)?|sweaters?|sweatshirts?|hoodies?|tops?|polos?|turtlenecks?)\b/i],
+  ["accessory", /모자|비니|벨트|목걸이|반지|귀걸이|팔찌|스카프|머플러|양말|시계|선글라스|안경|장갑|액세서리|주얼리|\b(?:hats?|caps?|beanies?|belts?|necklaces?|rings?|earrings?|bracelets?|scarf|scarves|socks|watch(?:es)?|sunglasses|gloves|accessor(?:y|ies)|jewelry)\b/i],
+];
+
+export function guessCategory(texts: (string | null | undefined)[]): Category | null {
+  for (const t of texts) {
+    if (!t) continue;
+    for (const [cat, re] of CATEGORY_RULES) if (re.test(t)) return cat;
+  }
+  return null;
+}
+
+/** JSON-LD BreadcrumbList의 이름들 ("홈 > 상의 > 니트") */
+function breadcrumbText(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const t = breadcrumbText(n);
+      if (t) return t;
+    }
+    return null;
+  }
+  const obj = node as { "@type"?: unknown; itemListElement?: unknown; "@graph"?: unknown };
+  if (obj["@type"] === "BreadcrumbList" && Array.isArray(obj.itemListElement)) {
+    const names = obj.itemListElement
+      .map((e: unknown) => {
+        if (!e || typeof e !== "object") return "";
+        const el = e as { name?: unknown; item?: unknown };
+        if (typeof el.name === "string") return el.name;
+        const item = el.item as { name?: unknown } | null | undefined;
+        return item && typeof item === "object" && typeof item.name === "string" ? item.name : "";
+      })
+      .filter(Boolean);
+    return names.length ? names.join(" > ") : null;
+  }
+  return obj["@graph"] ? breadcrumbText(obj["@graph"]) : null;
+}
+
 interface JsonLdProduct {
   "@type"?: string | string[];
   name?: string;
+  category?: string | string[];
   image?: string | string[] | { url?: string };
   brand?: string | { name?: string };
   offers?: { price?: unknown; lowPrice?: unknown } | { price?: unknown; lowPrice?: unknown }[];
@@ -57,10 +107,13 @@ function findProduct(node: unknown): JsonLdProduct | null {
 /** 쇼핑몰 상품 페이지 HTML에서 상품명/브랜드/가격/이미지를 뽑는다 (JSON-LD 우선, 없으면 OpenGraph). */
 export function parseProductHtml(html: string, url: string): UrlImport {
   let product: JsonLdProduct | null = null;
+  let breadcrumb: string | null = null;
   for (const m of html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try {
-      product = findProduct(JSON.parse(m[1]));
-      if (product) break;
+      const data: unknown = JSON.parse(m[1]);
+      product ??= findProduct(data);
+      breadcrumb ??= breadcrumbText(data);
+      if (product && breadcrumb) break;
     } catch {
       /* 잘못된 JSON-LD 무시 */
     }
@@ -94,7 +147,11 @@ export function parseProductHtml(html: string, url: string): UrlImport {
       image = null;
     }
   }
-  return { name: name ? decodeEntities(name) : null, brand, price, image_url: image, url };
+  const decodedName = name ? decodeEntities(name) : null;
+  const ldCategory = Array.isArray(product?.category) ? product.category.filter((x) => typeof x === "string").join(" > ") : typeof product?.category === "string" ? product.category : null;
+  // 분류 글이 상품명보다 믿을 만하다 (상품명에는 "셔츠 같은 자켓"처럼 여러 말이 섞임)
+  const category = guessCategory([breadcrumb, ldCategory, meta(html, "product:category"), decodedName]);
+  return { name: decodedName, brand, price, image_url: image, url, category };
 }
 
 const MAX_HTML_BYTES = 2_000_000;

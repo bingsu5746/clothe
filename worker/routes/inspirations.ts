@@ -5,8 +5,9 @@ import { coerceInspirationAnalysis, getAllItems, rowToInspiration, type Row } fr
 import { geminiJson, INSPIRATION_SCHEMA, loadImage } from "../lib/gemini";
 import { deleteUnreferencedImages } from "../lib/images";
 import { inspirationPrompt } from "../lib/stylist";
+import { searchShopping, toRecommendedLinks, wishSearchQuery } from "../lib/shopping";
 import { HttpError, newId } from "../lib/util";
-import { optImageKey, optLink, optStr, paramId, readJson } from "../lib/validate";
+import { optEnum, optImageKey, optLink, optStr, paramId, readJson } from "../lib/validate";
 
 const app = new Hono<AppEnv>();
 
@@ -28,8 +29,9 @@ app.post("/", async (c) => {
   const image_key = optImageKey(b, "image_key", "사진");
   if (!image_key) throw new HttpError(400, "사진이 필요해요");
   const id = newId();
-  await c.env.DB.prepare("INSERT INTO inspirations (id, image_key, source_url, note) VALUES (?, ?, ?, ?)")
-    .bind(id, image_key, optLink(b, "source_url", 2000, "출처 링크") ?? null, optStr(b, "note", 500, "메모") ?? null)
+  const kind = optEnum(b, "kind", ["photo", "collage"] as const, "종류") ?? "photo";
+  await c.env.DB.prepare("INSERT INTO inspirations (id, kind, image_key, source_url, note) VALUES (?, ?, ?, ?, ?)")
+    .bind(id, kind, image_key, optLink(b, "source_url", 2000, "출처 링크") ?? null, optStr(b, "note", 500, "메모") ?? null)
     .run();
   return c.json(await getInspiration(c.env.DB, id), 201);
 });
@@ -82,7 +84,10 @@ app.post("/:id/analyze", async (c) => {
   return c.json({ ...insp, analysis });
 });
 
-/** 분석된 piece 하나를 위시리스트에 추가 */
+/**
+ * 분석된 piece 하나를 위시리스트에 추가하고, 바로 구매 링크(네이버 쇼핑 결과 또는 쇼핑몰 검색 링크)도 찾아 둔다.
+ * 링크 찾기가 실패해도 추가는 성공으로 본다.
+ */
 app.post("/:id/pieces/:index/wishlist", async (c) => {
   const id = paramId(c);
   const index = Number(c.req.param("index"));
@@ -99,6 +104,13 @@ app.post("/:id/pieces/:index/wishlist", async (c) => {
     ).bind(wid, piece.description || "스크랩에서 추가한 옷", piece.category, insp.analysis.summary, JSON.stringify(piece.colors), insp.image_key, id),
     c.env.DB.prepare("UPDATE inspirations SET analysis = ? WHERE id = ?").bind(JSON.stringify(insp.analysis), id),
   ]);
+  try {
+    const name = piece.description || "스크랩에서 추가한 옷";
+    const links = toRecommendedLinks(await searchShopping(c.env, wishSearchQuery({ name, colors: piece.colors }).slice(0, 100), 5));
+    await c.env.DB.prepare("UPDATE wishlist SET recommended_links = ? WHERE id = ?").bind(JSON.stringify(links), wid).run();
+  } catch (e) {
+    console.error("wishlist links failed", e);
+  }
   return c.json({ wishlist_id: wid }, 201);
 });
 

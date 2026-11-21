@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv, Env } from "../env";
-import { CATEGORY_LABEL, type Category, type PurchaseValidation, type WishCombos, type WishlistItemV2 } from "../../shared/types";
-import { cacheGet, cachePut, coerceLinks, getAllItems, rowToItem, rowToWish, wardrobeSignature, type Row } from "../lib/db";
+import { CATEGORY_LABEL, type Category, type PurchaseValidation, type ShoppingLink, type WishCombos, type WishlistItemV2 } from "../../shared/types";
+import { cacheGet, cachePut, coerceLinks, getAllItems, MAX_STORED_LINKS, rowToItem, rowToWish, wardrobeSignature, type Row } from "../lib/db";
 import { geminiJson, loadImage, WISH_COMBOS_SCHEMA, type GeminiImage } from "../lib/gemini";
 import { deleteUnreferencedImages } from "../lib/images";
 import { getProfile, profileForPrompt } from "../lib/profile";
@@ -51,7 +51,7 @@ function readWishFields(b: Body): WishInput & { status?: (typeof STATUSES)[numbe
   if (status !== undefined) out.status = status;
   if (b.recommended_links !== undefined) {
     if (b.recommended_links !== null && !Array.isArray(b.recommended_links)) throw new HttpError(400, "구매 링크: 목록으로 보내 주세요");
-    out.recommended_links = JSON.stringify(coerceLinks(b.recommended_links ?? [], 20));
+    out.recommended_links = JSON.stringify(coerceLinks(b.recommended_links ?? [], MAX_STORED_LINKS));
   }
   return out;
 }
@@ -141,6 +141,7 @@ app.post("/from-url", async (c) => {
   const image_key = p.image_url ? await saveRemoteImage(c.env.BUCKET, p.image_url) : null;
   const wish = await createWish(c.env, {
     name: [p.brand, p.name].filter(Boolean).join(" ") || url,
+    category: p.category,
     estimated_price: p.price,
     image_key,
     image_url: p.image_url,
@@ -269,14 +270,23 @@ app.post("/:id/validate", async (c) => {
   return c.json({ ...validation, cached: false });
 });
 
-/** 이 옷의 구매 링크를 찾아서 저장 (네이버 쇼핑 API 키가 있으면 상품, 없으면 쇼핑몰 검색 링크) */
+/**
+ * 검색으로 찾은 링크(naver_item, *_search)는 새 결과로 바꾸고, 직접 추가한 링크(custom)는 그대로 둔다.
+ * 같은 주소가 새 결과에도 있으면 새 결과 쪽 하나만 남긴다.
+ */
+export function mergeRecommendedLinks(previous: ShoppingLink[], fresh: ShoppingLink[]): ShoppingLink[] {
+  const custom = previous.filter((l) => l.source === "custom" && !fresh.some((f) => f.url === l.url));
+  return [...fresh, ...custom].slice(0, MAX_STORED_LINKS);
+}
+
+/** 이 옷의 구매 링크를 찾아서 저장 (네이버 쇼핑 API 키가 있으면 상품, 없으면 쇼핑몰 검색 링크). 직접 추가한 링크는 유지. */
 app.post("/:id/links", async (c) => {
   const id = paramId(c);
   const wish = rowToWish(await getWishRow(c.env.DB, id));
   const b = await readJson(c, { allowEmpty: true });
   const query = optStr(b, "query", 100, "검색어") ?? wishSearchQuery(wish);
   const search = await searchShopping(c.env, query, 10);
-  const links = toRecommendedLinks(search);
+  const links = mergeRecommendedLinks(wish.recommended_links, toRecommendedLinks(search));
   await c.env.DB.prepare("UPDATE wishlist SET recommended_links = ? WHERE id = ?").bind(JSON.stringify(links), id).run();
   return c.json({ query, source: search.source, notice: search.notice, recommended_links: links });
 });

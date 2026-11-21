@@ -1,5 +1,6 @@
 import initSql from "../../migrations/0001_init.sql?raw";
 import featuresSql from "../../migrations/0002_features.sql?raw";
+import coversSql from "../../migrations/0003_covers.sql?raw";
 
 /**
  * 런타임 마이그레이터.
@@ -23,6 +24,7 @@ export interface Migration {
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "0001_init", sql: initSql },
   { version: 2, name: "0002_features", sql: featuresSql },
+  { version: 3, name: "0003_covers", sql: coversSql },
 ];
 
 /** 주석을 지우고 ; 기준으로 SQL 문장을 나눈다 */

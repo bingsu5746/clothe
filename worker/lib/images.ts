@@ -27,6 +27,7 @@ export const REFERENCED_SQL = `
 SELECT (
   EXISTS (SELECT 1 FROM items WHERE image_key = ?1)
   OR EXISTS (SELECT 1 FROM inspirations WHERE image_key = ?1)
+  OR EXISTS (SELECT 1 FROM outfits WHERE cover_image_key = ?1)
   OR EXISTS (SELECT 1 FROM wishlist WHERE image_key = ?1)
   OR EXISTS (SELECT 1 FROM outfit_logs WHERE selfie_key = ?1)
   OR EXISTS (SELECT 1 FROM profile WHERE face_image_key = ?1 OR body_image_key = ?1 OR instr(mannequin_images, ?2) > 0)

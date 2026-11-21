@@ -65,6 +65,7 @@ export function rowToOutfit(r: Row): Outfit {
     source: asEnum(r.source, ["manual", "ai", "reference"] as const) ?? "manual",
     reason: strOrNull(r.reason),
     tags: jsonStrings(r.tags),
+    cover_image_key: strOrNull(r.cover_image_key),
     created_at: asString(r.created_at),
   };
 }
@@ -84,6 +85,7 @@ export function coerceInspirationAnalysis(v: unknown): InspirationAnalysis | nul
 export function rowToInspiration(r: Row): Inspiration {
   return {
     id: String(r.id),
+    kind: r.kind === "collage" ? "collage" : "photo",
     image_key: asString(r.image_key),
     source_url: linkOrNull(r.source_url),
     note: strOrNull(r.note),
@@ -91,6 +93,9 @@ export function rowToInspiration(r: Row): Inspiration {
     created_at: asString(r.created_at),
   };
 }
+
+/** 위시리스트에 저장하는 구매 링크 최대 개수 (검색 결과 최대 8개 + 직접 추가한 링크) */
+export const MAX_STORED_LINKS = 30;
 
 const LINK_SOURCES = ["naver_search", "musinsa_search", "29cm_search", "naver_item", "custom"] as const;
 
@@ -143,7 +148,7 @@ export function rowToWish(r: Row): WishlistItemV2 {
     validator_score: numOrNull(r.validator_score),
     validator_comment: strOrNull(r.validator_comment),
     validation: coerceValidation(parseJsonUnknown(r.validation)),
-    recommended_links: coerceLinks(parseJsonUnknown(r.recommended_links)),
+    recommended_links: coerceLinks(parseJsonUnknown(r.recommended_links), MAX_STORED_LINKS),
   };
 }
 

@@ -1,5 +1,9 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../env";
+import type { AppStatus } from "../../shared/types";
+import { geminiModel } from "../lib/gemini";
+import { naverEnabled } from "../lib/shopping";
+import { tryOnAvailability } from "../lib/tryon";
 import { HttpError, parseJsonUnknown } from "../lib/util";
 import { sameImageFamily, sniffImageType } from "../lib/images";
 import { isImageKey } from "../lib/validate";
@@ -55,6 +59,20 @@ export async function serveImage(bucket: R2Bucket, key: string, request: Request
 app.get("/images/:dir/:name", (c) =>
   serveImage(c.env.BUCKET, `${c.req.param("dir")}/${c.req.param("name")}`, c.req.raw, "private, max-age=31536000, immutable"),
 );
+
+/**
+ * 선택·외부 기능이 켜져 있는지 한 번에 (설정 화면 "연결 상태", AI 버튼 옆 안내용).
+ * 시크릿은 있는지 없는지만 알려 주고 값은 절대 내려주지 않는다.
+ */
+app.get("/status", (c) => {
+  const status: AppStatus = {
+    ai: { configured: Boolean(c.env.GEMINI_API_KEY), model: geminiModel(c.env) },
+    tryon: tryOnAvailability(c.env),
+    shopping: { naver_enabled: naverEnabled(c.env) },
+    shortcut: { configured: Boolean(c.env.SHORTCUT_TOKEN) },
+  };
+  return c.json(status);
+});
 
 const SETTING_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/;
 const MAX_SETTING_BYTES = 8 * 1024;
