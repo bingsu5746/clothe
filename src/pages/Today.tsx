@@ -106,8 +106,14 @@ export default function Today() {
   }, [saved.data, weather, byId]);
 
   const wear = async (ids: string[], outfit_id?: string) => {
+    // 옷장에서 지운 옷은 빼고 기록한다 (서버는 없는 옷이 섞이면 400). 아직 저장 중인 코디(temp-)의 id 는 보내지 않는다.
+    const known = ids.filter((id) => byId.has(id));
+    if (!known.length) {
+      toast.error("옷장에 남아 있는 옷이 없어요");
+      return;
+    }
     try {
-      toast(wearToast(await wearItems(ids, { outfit_id, weather_summary: weatherSummary })));
+      toast(wearToast(await wearItems(known, { outfit_id: outfit_id?.startsWith("temp-") ? undefined : outfit_id, weather_summary: weatherSummary })));
     } catch (e) {
       toast.error((e as Error).message);
     }
@@ -290,9 +296,9 @@ export default function Today() {
         </div>
       </div>
 
-      <p className="mt-14 text-caption text-faint">
+      <p className="mt-14 text-caption text-muted">
         날씨 데이터{" "}
-        <a className="underline underline-offset-2 hover:text-muted" href="https://open-meteo.com/" target="_blank" rel="noreferrer">
+        <a className="underline underline-offset-2 hover:text-ink" href="https://open-meteo.com/" target="_blank" rel="noreferrer">
           Open-Meteo.com
         </a>{" "}
         (CC BY 4.0)

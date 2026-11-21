@@ -136,7 +136,7 @@
 | `toast(msg, { tone, action, duration })`, `toast.error(msg)` | – | 짧은 결과 알림. 탭 바 위에 뜸 |
 | `confirmDialog({ title, message, confirmLabel, destructive })` → `Promise<boolean>` | – | `window.confirm` 대신 |
 | `promptDialog({ title, message, defaultValue, placeholder, inputMode, allowEmpty })` → `Promise<string \| null>` | – | `window.prompt` 대신. 취소하면 `null` |
-| `Sheet` | `open`, `onClose`, `title`, `footer`, `size: md \| lg` | 모바일은 아래 시트(손잡이를 끌어내려 닫기), 넓은 화면은 가운데 모달. 포커스 가두기·Esc·바깥 누르기 포함 |
+| `Sheet` | `open`, `onClose`, `title`, `footer`, `size: md \| lg` | 모바일은 아래 시트(손잡이를 끌어내려 닫기), 넓은 화면은 가운데 모달. 포커스 가두기(Tab 순환)·Esc·바깥 누르기 포함. 모달은 쌓이고(`useModal`), 맨 위 모달만 Esc 를 받으며 그 아래는 모두 inert |
 
 ```tsx
 if (await confirmDialog({ title: "이 옷을 삭제할까요?", confirmLabel: "삭제", destructive: true })) { … }
@@ -249,7 +249,10 @@ export default function Travel() {
 - 아이콘만 있는 버튼은 `IconButton label="…"`.
 - 키보드 포커스 링은 전역(`:focus-visible`, 2px 잉크). 지우지 마세요.
 - 본문 글자는 `ink`/`ink-2`/`muted` 만(대비 AA). `faint` 는 placeholder·장식 전용.
-- 진행 상태에는 `role="status"`, 오류에는 `Notice`(=`role="alert"`).
+- 진행 상태에는 `role="status"`, 오류에는 `Notice`(=`role="alert"`). 토스트는 `ToastHost` 가 항상 그려 두는 숨은 live region 으로 읽혀요.
+- 화면마다 보이는 `h1` 은 하나. 분할 보기 오른쪽 패널처럼 목록 화면 옆에 함께 보이는 `Page` 는 `titleLevel={2}`.
+- 보이는 글자가 접근 가능한 이름에 그대로 들어가게(음성 제어). 아이콘+글자 버튼에 `aria-label` 을 따로 줄 때는 보이는 글자를 포함할 것.
+- `npm run e2e` 가 모든 화면을 axe-core 로 검사해요(serious/critical 이면 실패).
 
 ## 7. 화면 상태 문구 (예시)
 

@@ -7,7 +7,7 @@ import { Button, Chip, ChipRow, Empty, Field, Img, Input, Notice, Page, Segmente
 import { api, imageUrl, uploadImage, won } from "../lib/api";
 import { useIsWide, useStoredFlag } from "../lib/hooks";
 import { composeCutout } from "../lib/image";
-import { cpw, patchItemInCache, removeItemFromCache, linkError, useItems, wearItems, wearToast } from "../lib/items";
+import { cpw, invalidateWearCaches, patchItemInCache, removeItemFromCache, linkError, useItems, wearItems, wearToast } from "../lib/items";
 import { useQuery } from "../lib/query";
 import { useAiConfigured } from "../lib/status";
 import { AiOffNotice } from "../components/AiStatus";
@@ -99,13 +99,13 @@ function ItemEditor({ id }: { id: string | undefined }) {
   if (!form) {
     if (itemsLoading)
       return (
-        <Page title="옷 정보" back="/closet" backStyle={wide ? "close" : "back"} width="narrow">
+        <Page title="옷 정보" back="/closet" backStyle={wide ? "close" : "back"} titleLevel={wide ? 2 : 1} width="narrow">
           <Skeleton className="mx-auto w-full max-w-[280px] rounded-lg" style={{ aspectRatio: ITEM_RATIO }} />
           <SkeletonText lines={4} className="mt-8" />
         </Page>
       );
     return (
-      <Page title="옷 정보" back="/closet" backStyle={wide ? "close" : "back"} width="narrow">
+      <Page title="옷 정보" back="/closet" backStyle={wide ? "close" : "back"} titleLevel={wide ? 2 : 1} width="narrow">
         <Empty icon={<HangerIcon size={26} />} title="옷을 찾을 수 없어요" action={<Button onClick={() => goBack("/closet")}>옷장으로</Button>}>
           삭제되었거나 주소가 잘못되었어요.
         </Empty>
@@ -237,10 +237,11 @@ function ItemEditor({ id }: { id: string | undefined }) {
   };
 
   const remove = async () => {
-    if (!(await confirmDialog({ title: "이 옷을 삭제할까요?", message: "착용 기록도 함께 사라지고 되돌릴 수 없어요.", confirmLabel: "삭제", destructive: true }))) return;
+    if (!(await confirmDialog({ title: "이 옷을 삭제할까요?", message: "되돌릴 수 없어요. 이 옷이 들어 있던 코디와 착용 기록에서는 빠진 채로 남아요.", confirmLabel: "삭제", destructive: true }))) return;
     try {
       await api(`/items/${id}`, { method: "DELETE" });
       removeItemFromCache(id!);
+      invalidateWearCaches(); // 장롱템·달력에 지운 옷이 남지 않게
       toast("삭제했어요");
       goBack("/closet");
     } catch (e) {
@@ -265,6 +266,7 @@ function ItemEditor({ id }: { id: string | undefined }) {
       title={isNew ? "옷 등록" : form.name || "옷 정보"}
       back="/closet"
       backStyle={wide ? "close" : "back"}
+      titleLevel={wide ? 2 : 1}
       width="narrow"
       right={
         <Button variant="primary" size="sm" onClick={save} loading={saving} disabled={!dirty || !form.name.trim() || !!busy}>
@@ -283,7 +285,7 @@ function ItemEditor({ id }: { id: string | undefined }) {
               loading="eager"
               className="rounded-lg"
               fallback={
-                <div className="flex flex-col items-center gap-2 text-footnote text-faint">
+                <div className="flex flex-col items-center gap-2 text-footnote text-muted">
                   <HangerIcon size={36} strokeWidth={1.3} />
                   사진이 아직 없어요
                 </div>
@@ -497,7 +499,7 @@ function CpwGauge({ item }: { item: Item }) {
   return (
     <div className="mt-3 rounded-lg bg-surface px-4 py-4 shadow-[0_0_0_1px_var(--line)]">
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-headline">뽕 뽑기 게이지</h3>
+        <h2 className="text-headline">뽕 뽑기 게이지</h2>
         <span className="text-subhead font-semibold tabular">
           {Math.min(worn, GOAL_WEARS)}/{GOAL_WEARS}회
         </span>

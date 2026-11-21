@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useSearchParams } from "react-router";
 import type { Item, OutfitLog } from "../../shared/types";
 import { CalendarIcon, CameraIcon, ChevronLeftIcon, ChevronRightIcon, ImageIcon, PencilIcon, PlusIcon, TrashIcon } from "../components/icons";
@@ -40,6 +40,7 @@ export default function OotdCalendar() {
   const { byId } = useItems();
   const [editing, setEditing] = useState<OutfitLog | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<string | null>(null);
 
   const go = (m: string, d?: string | null, focus = false) => {
     const next = new URLSearchParams();
@@ -47,13 +48,22 @@ export default function OotdCalendar() {
     if (d) next.set("day", d);
     setParams(next, { replace: true, preventScrollReset: true });
     if (focus && d) {
-      // 같은 달이면 칸이 이미 있으니 바로, 다른 달이면 그려진 뒤에 포커스
-      const find = () => gridRef.current?.querySelector<HTMLButtonElement>(`[data-date="${d}"]`);
-      const el = find();
+      // 같은 달이면 칸이 이미 있으니 바로, 다른 달이면 그려진 뒤에(아래 효과) 포커스.
+      // (화면 전환(View Transition) 때문에 새 달은 몇 프레임 뒤에 그려질 수 있어 requestAnimationFrame 으로는 놓쳤다)
+      const el = gridRef.current?.querySelector<HTMLButtonElement>(`[data-date="${d}"]`);
       if (el) el.focus();
-      else requestAnimationFrame(() => requestAnimationFrame(() => find()?.focus()));
+      else pendingFocus.current = d;
     }
   };
+  useEffect(() => {
+    const d = pendingFocus.current;
+    if (!d) return;
+    const el = gridRef.current?.querySelector<HTMLButtonElement>(`[data-date="${d}"]`);
+    if (el) {
+      pendingFocus.current = null;
+      el.focus();
+    }
+  });
 
   const byDay = useMemo(() => {
     const m = new Map<string, OutfitLog[]>();
@@ -107,7 +117,7 @@ export default function OotdCalendar() {
       title="코디"
       eyebrow={stats.days ? `${monthTitle(month)} · ${stats.days}일 기록` : undefined}
       right={
-        <AppLink to={`/outfits/ootd${day ? `?date=${day}` : ""}`} aria-label="OOTD 기록하기" title="OOTD 기록하기" className={buttonClass({ variant: "primary", size: "sm" })}>
+        <AppLink to={`/outfits/ootd${day ? `?date=${day}` : ""}`} aria-label="OOTD 기록" title="OOTD 기록하기" className={buttonClass({ variant: "primary", size: "sm" })}>
           <CameraIcon size={16} /> 기록
         </AppLink>
       }
@@ -225,10 +235,9 @@ function DayCell({ date, logs, byId, selected, isToday, future, focusable, loadi
         type="button"
         data-date={date}
         tabIndex={focusable ? 0 : -1}
-        aria-label={`${dayLabel(date)}${has ? `, 기록 ${logs.length}개` : ""}${isToday ? ", 오늘" : ""}`}
         aria-current={isToday ? "date" : undefined}
         onClick={onSelect}
-        className={`pressable-soft relative block aspect-[3/4] w-full overflow-hidden rounded-sm text-left transition-shadow duration-(--dur-fast) ${has ? "bg-surface-2" : "bg-surface shadow-[inset_0_0_0_1px_var(--line)]"} ${selected ? "shadow-[0_0_0_2px_var(--ink)]" : ""} ${future ? "opacity-50" : ""}`}
+        className={`pressable-soft relative block aspect-[3/4] w-full overflow-hidden rounded-sm text-left transition-shadow duration-(--dur-fast) ${has ? "bg-surface-2" : "bg-surface shadow-[inset_0_0_0_1px_var(--line)]"} ${selected ? "shadow-[0_0_0_2px_var(--ink)]" : ""} ${future ? "bg-transparent" : ""}`}
       >
         {loading ? (
           <span className="skeleton absolute inset-0 rounded-none" />
@@ -242,10 +251,13 @@ function DayCell({ date, logs, byId, selected, isToday, future, focusable, loadi
         {selfie && <span aria-hidden className="absolute inset-x-0 top-0 h-7 bg-gradient-to-b from-black/45 to-transparent" />}
         <span
           className={`absolute top-1 left-1 grid h-5 min-w-5 place-items-center rounded-full px-1 text-caption font-semibold tabular ${
-            isToday ? "bg-accent text-accent-ink" : selfie ? "text-white" : "text-ink-2"
+            isToday ? "bg-accent text-accent-ink" : selfie ? "text-white" : future ? "text-muted" : "text-ink-2"
           }`}
         >
+          {/* 보이는 숫자가 접근 가능한 이름 안에 그대로 들어가도록 (음성 제어: "21 누르기") */}
+          <span className="sr-only">{date.slice(5, 7).replace(/^0/, "")}월 </span>
           {n}
+          <span className="sr-only">{`일 (${dayLabel(date).split("(")[1]}${has ? `, 기록 ${logs.length}개` : ""}${isToday ? ", 오늘" : ""}`}</span>
         </span>
         {logs.length > 1 && <span className="absolute right-1 bottom-1 rounded-full bg-black/60 px-1.5 text-[10px] leading-4 font-semibold text-white tabular">{logs.length}</span>}
       </button>

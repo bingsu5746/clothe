@@ -54,15 +54,6 @@ function lockedError(f: Failures, now: number): HttpError {
   return new HttpError(429, `PIN을 너무 많이 틀렸어요. ${mins}분 뒤에 다시 시도해 주세요.`);
 }
 
-/** PIN 무차별 대입 방지: 15분 안에 5번 틀리면 15분 잠금 (읽기 전용 확인) */
-export async function checkLoginLock(db: D1Database, now = Date.now()): Promise<void> {
-  const row = await db.prepare("SELECT value FROM settings WHERE key = ?").bind(LOCK_KEY).first<{ value: string }>();
-  const f = parseFailures(row?.value);
-  if (!f) return;
-  if (now - f.first > LOCK_MS) return;
-  if (f.count >= MAX_FAILURES) throw lockedError(f, now);
-}
-
 /**
  * PIN을 비교하기 "전에" 시도 횟수를 원자적으로 1 올리고, 올린 뒤의 값으로 잠금 여부를 판단한다.
  * (예전 방식: 잠금 확인 → PIN 비교 → 실패 기록 은 동시 요청 수백 개가 모두 잠금 확인을 통과하고,
@@ -87,13 +78,6 @@ export async function registerLoginAttempt(db: D1Database, now = Date.now()): Pr
     .first<{ value: string }>();
   const f = parseFailures(row?.value);
   if (f && f.count > MAX_FAILURES) throw lockedError(f, now);
-}
-
-/** (호환용) 실패 한 번 기록. 새 코드는 registerLoginAttempt를 쓴다. */
-export async function recordLoginFailure(db: D1Database, now = Date.now()): Promise<void> {
-  await registerLoginAttempt(db, now).catch((e: unknown) => {
-    if (!(e instanceof HttpError && e.status === 429)) throw e;
-  });
 }
 
 export async function clearLoginFailures(db: D1Database): Promise<void> {

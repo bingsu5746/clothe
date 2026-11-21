@@ -123,12 +123,18 @@ app.post("/shortcut", async (c) => {
   }
 
   if (!url || !isPublicHttpUrl(url)) throw new HttpError(400, "이미지나 URL을 보내 주세요");
+  const asked = want;
   want ??= INSPIRATION_HOSTS.test(new URL(url).hostname) ? "inspiration" : "wishlist";
 
-  // URL 자체가 이미지인 경우
+  // URL 자체가 이미지인 경우 (target 이 없으면 코디 사진으로 본다)
   const direct = await saveRemoteImage(c.env.BUCKET, url);
   if (direct) {
     if (want === "closet") return saveItem(direct, null);
+    if (asked === "wishlist") {
+      // 예전에는 target=wishlist 를 무시하고 스크랩으로 저장했다
+      const wish = await createWish(c.env, { name: note || "단축어로 추가한 옷", image_key: direct, image_url: url });
+      return c.json({ ok: true, type: "wishlist", id: wish.id, message: "위시리스트에 추가했어요" });
+    }
     return saveInspiration(direct);
   }
 

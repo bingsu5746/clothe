@@ -8,11 +8,6 @@ export interface SavedLocation {
 
 export const DEFAULT_LOCATION: SavedLocation = { lat: 37.5665, lon: 126.978, name: "서울" };
 
-export async function getSavedLocation(): Promise<SavedLocation> {
-  const s = await api<{ location?: SavedLocation }>("/settings").catch(() => ({}) as { location?: SavedLocation });
-  return s.location ?? DEFAULT_LOCATION;
-}
-
 export async function saveLocation(loc: SavedLocation) {
   await api("/settings/location", { method: "PUT", json: loc });
 }

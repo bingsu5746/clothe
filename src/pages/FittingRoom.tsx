@@ -175,7 +175,7 @@ function TryOnPanel({ info, mannequins, profileLoading }: { info: TryOnAvailabil
     } finally {
       setStarting(false);
       // 모바일: 진행 상황·오류가 보이는 피팅 카드로 올라간다
-      if (!window.matchMedia("(min-width: 1024px)").matches) document.getElementById("tryon-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!window.matchMedia("(min-width: 1024px)").matches) document.getElementById("tryon-card")?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
     }
   };
 

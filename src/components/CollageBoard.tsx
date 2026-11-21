@@ -294,10 +294,11 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
       const [{ removeBackground }, { composeCutout }] = await Promise.all([import("../lib/background"), import("../lib/image")]);
       const blob = await fetch(imageUrl(l.key)!).then((r) => r.blob());
       const cut = await composeCutout(await removeBackground(blob, () => {}));
+      void saveCutout(l.key, cut);
+      if (!alive.current) return; // 기다리는 사이 화면을 떠났으면 기기에만 저장 (주소를 만들면 새어 나간다)
       const url = URL.createObjectURL(cut);
       cutoutUrls.current.push(url);
       setCutouts((m) => new Map(m).set(l.key, url));
-      void saveCutout(l.key, cut);
       toast("배경을 지웠어요. 이 기기에 기억해 둘게요");
     } catch (e) {
       console.warn("배경 제거 실패", e);
@@ -309,11 +310,13 @@ export function CollageBoard({ mannequins }: { mannequins: string[] }) {
 
   /** 배경 지운 사진을 버리고 원래 사진으로 */
   const restoreOriginal = (l: Layer) => {
+    const url = cutouts.get(l.key);
     setCutouts((m) => {
       const next = new Map(m);
       next.delete(l.key);
       return next;
     });
+    if (url) URL.revokeObjectURL(url);
     void deleteCutout(l.key);
   };
 

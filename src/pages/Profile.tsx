@@ -304,7 +304,8 @@ function MannequinSection({ profile: p }: { profile: ProfileT }) {
     <Section title="전신 사진" description="체형 진단과 가상 피팅·콜라주에 써요. 첫 번째 사진이 기본이에요." action={<span className="text-footnote text-muted tabular">{list.length}/{MAX_MANNEQUIN}</span>}>
       <div className="scroll-x bleed-gutter gap-3 md:mx-0 md:grid md:grid-cols-4 md:overflow-visible md:px-0 xl:grid-cols-3 2xl:grid-cols-4">
         {list.map((k, i) => (
-          <button key={k} type="button" onClick={() => setOpen(k)} className="pressable-soft relative w-[38%] shrink-0 rounded-md text-left md:w-auto" aria-label={`전신 사진 ${i + 1}${i === 0 ? " (기본)" : ""}`}>
+          <button key={k} type="button" onClick={() => setOpen(k)} className="pressable-soft relative w-[38%] shrink-0 rounded-md text-left md:w-auto">
+            <span className="sr-only">전신 사진 {i + 1}</span>
             <Img src={imageUrl(k)} ratio="3 / 4" className="rounded-md" />
             {i === 0 && <Badge tone="solid" className="absolute top-2 left-2">기본</Badge>}
           </button>

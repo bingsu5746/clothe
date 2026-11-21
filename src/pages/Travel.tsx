@@ -116,7 +116,7 @@ function TripCard({ trip: t, today }: { trip: Trip; today: string }) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="truncate text-eyebrow text-muted uppercase">{t.location_name ?? t.destination}</div>
-            <h3 className="mt-0.5 truncate text-headline">{t.name}</h3>
+            <h2 className="mt-0.5 truncate text-headline">{t.name}</h2>
             <p className="text-subhead text-muted tabular">
               {shortDate(t.start_date)} – {shortDate(t.end_date)} · {nightsLabel(t)}
             </p>

@@ -50,12 +50,6 @@ export function useOutfits() {
   return useQuery<Outfit[]>(OUTFITS_PATH);
 }
 
-/** 예전 이름 호환: useQuery와 같다 */
-export function useFetch<T>(path: string | null) {
-  const q = useQuery<T>(path);
-  return { data: q.data ?? null, setData: q.mutate, error: q.error, loading: q.loading, reload: q.reload };
-}
-
 /** 한국 시간 기준 오늘 날짜 (YYYY-MM-DD) */
 export function todayKST(): string {
   return new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
@@ -90,7 +84,20 @@ export function invalidateWearCaches() {
  * 성공하면 서버가 돌려준 실제 값(wear_count, last_worn_date)으로 맞춘다.
  * duplicate 면 같은 날 같은 조합이 이미 기록돼 있어서 횟수는 그대로다.
  */
-export async function wearItems(itemIds: string[], extra: { outfit_id?: string; weather_summary?: string } = {}): Promise<WearResult> {
+const wearing = new Map<string, Promise<WearResult>>();
+
+export function wearItems(itemIds: string[], extra: { outfit_id?: string; weather_summary?: string } = {}): Promise<WearResult> {
+  // 두 번 빨리 누르면(더블 탭) 같은 요청을 같이 기다린다. 서버는 동시에 온 같은 조합을 둘 다 새 기록으로 만들 수 있다
+  // (착용 횟수는 하루 한 번으로 맞지만 달력에 같은 기록이 두 줄 생긴다).
+  const key = [...new Set(itemIds)].sort().join(",");
+  const running = wearing.get(key);
+  if (running) return running;
+  const p = doWear(itemIds, extra).finally(() => wearing.delete(key));
+  wearing.set(key, p);
+  return p;
+}
+
+async function doWear(itemIds: string[], extra: { outfit_id?: string; weather_summary?: string }): Promise<WearResult> {
   const ids = new Set(itemIds);
   const result = await optimistic<Item[], WearResult>(
     ITEMS_PATH,

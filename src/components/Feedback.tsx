@@ -34,8 +34,3 @@ export function Notice({ tone = "error", title, children, action, className = ""
   );
 }
 
-/** 예전 이름 호환: 오류 문구 한 줄 */
-export function ErrorText({ children }: { children: ReactNode }) {
-  if (!children) return null;
-  return <Notice tone="error">{children}</Notice>;
-}

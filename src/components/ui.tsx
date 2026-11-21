@@ -9,7 +9,7 @@ export { Chip, ChipRow, Segmented } from "./Chip";
 export type { SegmentedOption } from "./Chip";
 export { Badge, Card, Eyebrow, ListGroup, ListRow, Section, Stat } from "./Card";
 export { Skeleton, SkeletonGrid, SkeletonText, SkeletonTile } from "./Skeleton";
-export { Empty, ErrorText, Notice } from "./Feedback";
+export { Empty, Notice } from "./Feedback";
 export { Img } from "./Img";
 export { Page, PageHeader } from "./PageHeader";
 export type { PageProps, PageHeaderProps, PageWidth } from "./PageHeader";

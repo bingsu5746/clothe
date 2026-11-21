@@ -4,47 +4,83 @@ import { usePresence } from "../lib/hooks";
 import { IconButton } from "./Button";
 import { CloseIcon } from "./icons";
 
-/* 열려 있는 모달 수. 하나라도 열려 있으면 앱 본문(#root)을 비활성화하고 스크롤을 잠근다. */
-let openModals = 0;
-function lockApp() {
-  openModals++;
-  if (openModals === 1) {
-    document.getElementById("root")?.setAttribute("inert", "");
-    document.documentElement.style.overflow = "hidden";
-  }
+/*
+ * 열려 있는 모달 쌓기. 맨 위 모달만 Esc 를 받고, 그 아래의 모든 것(앱 본문 #root, 아래에 깔린 시트, 토스트)은 inert.
+ * (예전에는 #root 만 inert 라서 시트 위에 확인 대화상자를 띄우면 Tab 이 아래 시트로 빠져나갔고,
+ *  Esc 한 번에 대화상자와 시트가 함께 닫혔다.)
+ */
+const stack: symbol[] = [];
+const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled):not([type="hidden"]), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+const inerted = new Map<symbol, Element[]>();
+
+function pushModal(token: symbol, panel: HTMLElement | null) {
+  stack.push(token);
+  const host = panel?.closest("body > *") ?? null;
+  const els = [...document.body.children].filter((el) => el !== host && !el.hasAttribute("inert") && el.tagName !== "SCRIPT" && !el.hasAttribute("data-live-region"));
+  els.forEach((el) => el.setAttribute("inert", ""));
+  inerted.set(token, els);
+  document.documentElement.style.overflow = "hidden";
 }
-function unlockApp() {
-  openModals = Math.max(0, openModals - 1);
-  if (openModals === 0) {
-    document.getElementById("root")?.removeAttribute("inert");
-    document.documentElement.style.overflow = "";
-  }
+function popModal(token: symbol) {
+  const i = stack.indexOf(token);
+  if (i >= 0) stack.splice(i, 1);
+  inerted.get(token)?.forEach((el) => el.removeAttribute("inert"));
+  inerted.delete(token);
+  if (stack.length === 0) document.documentElement.style.overflow = "";
 }
 
-/** 모달 공통: 열릴 때 포커스를 안으로 옮기고, 닫히면 원래 자리로. Esc로 닫기. 바깥은 inert. */
+/**
+ * 모달 공통: 열릴 때 포커스를 안으로 옮기고, 닫히면 원래 자리로. Esc로 닫기(맨 위 모달만). 바깥은 inert.
+ * onClose 는 ref 로 들고 있어서, 부모가 다시 그려지며 새 함수를 넘겨도 효과가 다시 돌지 않는다
+ * (다시 돌면 포커스가 입력칸 밖으로 튀고, 프롬프트 입력칸은 글자를 칠 때마다 전체 선택되어 한 글자씩 덮어써졌다).
+ */
 export function useModal(active: boolean, onClose: () => void, panelRef: React.RefObject<HTMLElement | null>) {
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  });
   useEffect(() => {
     if (!active) return;
+    const token = Symbol("modal");
     const previous = document.activeElement as HTMLElement | null;
-    lockApp();
     const panel = panelRef.current;
+    pushModal(token, panel);
     if (panel && !panel.contains(document.activeElement)) {
       const auto = panel.querySelector<HTMLElement>("[data-autofocus]");
       (auto ?? panel).focus({ preventScroll: true });
     }
     const onKey = (e: KeyboardEvent) => {
+      if (stack[stack.length - 1] !== token) return;
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
+      } else if (e.key === "Tab" && panel) {
+        // 바깥은 inert 라 Tab 이 주소창 등 브라우저 밖으로 나간다 → 처음/끝에서 반대쪽으로 돌린다
+        const items = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.getClientRects().length > 0);
+        if (!items.length) {
+          e.preventDefault();
+          panel.focus();
+          return;
+        }
+        const first = items[0];
+        const last = items[items.length - 1];
+        const at = document.activeElement;
+        if (e.shiftKey && (at === first || at === panel)) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && at === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      unlockApp();
+      popModal(token);
       if (previous && document.contains(previous)) previous.focus({ preventScroll: true });
     };
-  }, [active, onClose, panelRef]);
+  }, [active, panelRef]);
 }
 
 export interface SheetProps {

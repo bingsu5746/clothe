@@ -1,241 +1,53 @@
 #!/usr/bin/env node
 /**
- * 끝에서 끝까지(E2E) 연기 테스트. `npm run e2e` 로 실행한다 (`npm test` 에는 포함되지 않음).
+ * 끝에서 끝까지(E2E) 연기 테스트. `npm run e2e` 로 실행한다 (`npm test` 에는 포함되지 않음). 공용 도구는 harness.mjs.
  *
  * 하는 일:
  *  1. 저장소 밖 임시 폴더에 격리된 wrangler 설정·.dev.vars(PIN 1234, Gemini 키 없음)·D1/R2 상태를 만들고
  *     Vite 개발 서버를 포트 5184(E2E_PORT)에 띄운다. 저장소 안에는 아무 파일도 만들지 않는다.
  *  2. API로 옷·코디·스크랩·위시리스트·여행·착용 기록·프로필 사진을 넣는다.
- *  3. 390×844(모바일)과 1440×900(데스크톱)에서 모든 화면을 열고 내비게이션을 눌러 본다.
- *     콘솔 오류, 페이지 오류, 5xx 응답, 가로 넘침이 하나라도 있으면 실패.
- *  4. 몇 가지 흐름을 실제로 눌러 본다: 콜라주 → 코디로 저장(대표 그림), 구매 링크 다시 찾기(직접 추가한 링크 유지),
- *     AI 성공 경로(Playwright page.route 로 계약서 모양의 가짜 응답), 모바일 피팅룸 고정 "피팅 시작" 바.
+ *  3. 390×844(모바일)·820×1180(iPad 세로)·1440×900(데스크톱)을 라이트·다크 테마로 모든 화면을 열어 본다.
+ *     콘솔 오류, 페이지 오류, 5xx 응답, 가로 넘침, h1 개수, 이름 없는 컨트롤, alt 없는 이미지,
+ *     axe-core(WCAG 2.1 AA) serious/critical 위반이 하나라도 있으면 실패. 라이트 테마에서는 내비게이션도 눌러 본다.
+ *  4. 흐름: 콜라주 → 코디로 저장(대표 그림), 구매 링크 다시 찾기(직접 추가한 링크 유지),
+ *     AI 성공 경로(page.route 로 계약서 모양의 가짜 응답), 모바일 피팅룸 고정 "피팅 시작" 바,
+ *     키보드·포커스(시트·대화상자 포커스 가두기/되돌리기/Esc, 겹친 모달, 프롬프트 입력, 세그먼트, 달력, 콜라주, 색 찍기),
+ *     배경 지운 사진의 IndexedDB 저장·복원(배경 제거 라이브러리는 미리 만든 PNG 를 돌려주는 가짜 모듈), 동작 줄이기.
  *  5. 서버를 끄고 임시 폴더를 지운다 (E2E_KEEP=1 이면 남김). 스크린숏은 E2E_OUT(기본: 임시 폴더/shots).
  *
  * 외부 네트워크(Open-Meteo, Pretendard 글꼴 CDN)는 브라우저에서 가짜로 응답한다.
+ * E2E_CONFIGS=m-light,t-dark 처럼 화면 검사할 조합을 줄일 수 있다.
  */
-import { createRequire } from "node:module";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { deflateSync, crc32 } from "node:zlib";
+import { join } from "node:path";
+import {
+  BASE, OUT, api, checkOverflow, checkStructure, cleanup, fail, failures, loadPlaywright, newContext, ok, png, runAxe, screenPaths, seed, settle, startServer, TMP,
+} from "./harness.mjs";
 
-const require = createRequire(import.meta.url);
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const PORT = Number(process.env.E2E_PORT ?? 5184);
-const BASE = `http://localhost:${PORT}`;
-const KEEP = process.env.E2E_KEEP === "1";
-const TMP = mkdtempSync(join(process.env.E2E_TMP ?? tmpdir(), "clothe-e2e-"));
-const OUT = process.env.E2E_OUT ? resolve(process.env.E2E_OUT) : join(TMP, "shots");
-mkdirSync(OUT, { recursive: true });
-
-const failures = [];
-const fail = (msg) => {
-  failures.push(msg);
-  console.error(`  ✗ ${msg}`);
-};
-const ok = (msg) => console.log(`  ✓ ${msg}`);
-
-/* ───────────── 격리된 서버 ───────────── */
-
-function writeIsolatedConfig() {
-  const raw = readFileSync(join(ROOT, "wrangler.jsonc"), "utf8")
-    .split("\n")
-    .filter((l) => !/^\s*\/\//.test(l))
-    .map((l) => l.replace(/\s\/\/ .*$/, ""))
-    .join("\n");
-  const cfg = JSON.parse(raw);
-  delete cfg.$schema;
-  cfg.main = join(ROOT, "worker/index.ts");
-  for (const d of cfg.d1_databases ?? []) d.migrations_dir = join(ROOT, "migrations");
-  const configPath = join(TMP, "wrangler.json");
-  writeFileSync(configPath, JSON.stringify(cfg, null, 2));
-  // 로컬 PIN 1234, Gemini 키 없음 (AI 성공 경로는 브라우저에서 가짜로)
-  writeFileSync(join(TMP, ".dev.vars"), ["APP_PIN=1234", "SESSION_SECRET=e2e-session-secret-0123456789", "SHORTCUT_TOKEN=e2e-shortcut-token", "GEMINI_API_KEY=", ""].join("\n"));
-  return configPath;
-}
-
-async function startServer() {
-  const { createServer } = await import(join(ROOT, "node_modules/vite/dist/node/index.js"));
-  const react = (await import(join(ROOT, "node_modules/@vitejs/plugin-react/dist/index.js"))).default;
-  const tailwindcss = (await import(join(ROOT, "node_modules/@tailwindcss/vite/dist/index.mjs"))).default;
-  const { cloudflare } = await import(join(ROOT, "node_modules/@cloudflare/vite-plugin/dist/index.mjs"));
-  const server = await createServer({
-    root: ROOT,
-    configFile: false,
-    logLevel: "warn",
-    cacheDir: join(TMP, "vite-cache"),
-    server: { port: PORT, strictPort: true },
-    plugins: [react(), tailwindcss(), cloudflare({ configPath: writeIsolatedConfig(), persistState: { path: join(TMP, "state") } })],
-  });
-  await server.listen();
-  return server;
-}
-
-/* ───────────── 시드 데이터 ───────────── */
-
-/** 단색 PNG (API는 실제 이미지 바이트만 받는다) */
-function png(w, h, [r, g, b]) {
-  const row = Buffer.alloc(1 + w * 3);
-  for (let x = 0; x < w; x++) row.set([r, g, b], 1 + x * 3);
-  const raw = Buffer.concat(Array.from({ length: h }, () => row));
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const td = Buffer.concat([Buffer.from(type), data]);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(td));
-    return Buffer.concat([len, td, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr.set([8, 2, 0, 0, 0], 8);
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
-}
-
-let cookie = "";
-async function api(method, path, body) {
-  const init = { method, headers: { cookie, origin: BASE } };
-  if (body instanceof FormData) init.body = body;
-  else if (body !== undefined) {
-    init.body = JSON.stringify(body);
-    init.headers["content-type"] = "application/json";
-  }
-  const res = await fetch(`${BASE}/api${path}`, init);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`${method} ${path} → ${res.status} ${JSON.stringify(data)}`);
-  return data;
-}
-async function upload(color, w = 120, h = 160) {
-  const form = new FormData();
-  form.append("file", new File([png(w, h, color)], "a.png", { type: "image/png" }));
-  return (await api("POST", "/images", form)).key;
-}
-
-async function seed() {
-  const login = await fetch(`${BASE}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pin: "1234" }) });
-  if (!login.ok) throw new Error(`로그인 실패 ${login.status}`);
-  cookie = login.headers.get("set-cookie").split(";")[0];
-
-  const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-  const img = {};
-  for (const [k, c] of Object.entries({ shirt: [240, 240, 236], slacks: [60, 60, 70], coat: [170, 120, 80], shoes: [30, 30, 30], person: [210, 190, 170], ref: [200, 180, 160], wish: [120, 140, 180] })) img[k] = await upload(c);
-
-  const items = {
-    shirt: await api("POST", "/items", { name: "흰 옥스퍼드 셔츠", category: "top", colors: ["화이트"], brand: "유니클로", purchase_price: 39000, image_key: img.shirt, season: ["spring", "fall"], warmth: 2 }),
-    slacks: await api("POST", "/items", { name: "차콜 와이드 슬랙스", category: "bottom", colors: ["차콜"], purchase_price: 59000, image_key: img.slacks, warmth: 3 }),
-    coat: await api("POST", "/items", { name: "카멜 울 코트", category: "outer", colors: ["카멜"], purchase_price: 289000, image_key: img.coat, warmth: 5 }),
-    shoes: await api("POST", "/items", { name: "검정 더비 슈즈", category: "shoes", colors: ["블랙"], image_key: img.shoes }),
-    nophoto: await api("POST", "/items", { name: "사진 없는 니트 (아주 긴 이름이 화면을 넘치지 않는지 확인하는 용도의 이름)", category: "top", colors: ["네이비"] }),
-  };
-  const outfit = await api("POST", "/outfits", { name: "출근룩", item_ids: [items.shirt.id, items.slacks.id, items.coat.id], tags: ["출근"] });
-  await api("POST", "/items/wear", { item_ids: [items.shirt.id, items.slacks.id], date: today });
-  await api("POST", "/logs", { item_ids: [items.coat.id], date: today, rating: 4, occasion_tags: ["데이트"], selfie_key: img.person, note: "따뜻했어요" }).catch(() => {});
-  const photo = await api("POST", "/inspirations", { image_key: img.ref, source_url: "https://www.pinterest.com/pin/1", note: "핀터레스트" });
-  const collage = await api("POST", "/inspirations", { image_key: img.ref, note: "콜라주 보드에서 만든 코디", kind: "collage" });
-  const wish = await api("POST", "/wishlist", { name: "네이비 니트 베스트", category: "top", colors: ["네이비"], estimated_price: 79000, image_key: img.wish });
-  await api("PATCH", `/wishlist/${wish.id}`, { recommended_links: [{ title: "내가 찾은 링크", url: "https://shop.example.com/knit" }] });
-  await api("POST", "/wishlist", { name: "사진 없는 가방", category: "bag" });
-  const start = new Date(Date.now() + 40 * 86400e3).toISOString().slice(0, 10);
-  const end = new Date(Date.now() + 43 * 86400e3).toISOString().slice(0, 10);
-  const trip = await api("POST", "/trips", { destination: "도쿄", start_date: start, end_date: end, notes: "하루 2만 보 걷기", lat: 35.68, lon: 139.69, location_name: "도쿄" });
-  await api("POST", `/trips/${trip.id}/checklist`, { label: "보조 배터리" });
-  await api("PATCH", "/profile", { height_cm: 170, mannequin_images: [img.person] });
-  return { img, items, outfit, photo, collage, wish, trip };
-}
-
-/* ───────────── 브라우저 ───────────── */
-
-function loadPlaywright() {
-  try {
-    return require("playwright");
-  } catch {
-    return require(join(process.env.NODE_PATH?.split(":")[0] ?? "", "playwright"));
-  }
-}
-
-const FORECAST = {
-  current: { temperature_2m: 9.5 },
-  daily: { time: ["2026-11-21"], temperature_2m_max: [14.2], temperature_2m_min: [2.1], precipitation_probability_max: [20], weather_code: [2] },
-};
-
-async function newContext(browser, viewport, label) {
-  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, locale: "ko-KR", isMobile: viewport.width < 500, hasTouch: viewport.width < 500 });
-  await context.addCookies([{ name: "clothe_session", value: cookie.split("=").slice(1).join("="), url: BASE }]);
-  await context.route(/api\.open-meteo\.com/, (r) => r.fulfill({ json: FORECAST }));
-  await context.route(/geocoding-api\.open-meteo\.com/, (r) => r.fulfill({ json: { results: [{ name: "성수동", admin1: "서울", country: "대한민국", latitude: 37.54, longitude: 127.05 }] } }));
-  await context.route(/cdn\.jsdelivr\.net/, (r) => r.fulfill({ status: 200, contentType: "text/css", body: "" }));
-  const page = await context.newPage();
-  page.on("console", (m) => {
-    if (m.type() === "error") fail(`[${label}] 콘솔 오류 (${page.url()}): ${m.text().slice(0, 300)}`);
-  });
-  page.on("pageerror", (e) => fail(`[${label}] 페이지 오류 (${page.url()}): ${e.message.slice(0, 300)}`));
-  page.on("response", (res) => {
-    if (res.status() >= 500) fail(`[${label}] ${res.status()} ${res.request().method()} ${res.url()}`);
-  });
-  return { context, page };
-}
-
-async function settle(page) {
-  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => {});
-  await page.waitForTimeout(250);
-}
-
-async function checkOverflow(page, label, name) {
-  const o = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
-  if (o.sw > o.cw + 1) {
-    const culprits = await page.evaluate(() => {
-      const cw = document.documentElement.clientWidth;
-      return [...document.querySelectorAll("body *")]
-        .filter((el) => el.getBoundingClientRect().right > cw + 1 && getComputedStyle(el).position !== "fixed")
-        .slice(0, 5)
-        .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)}`);
-    });
-    fail(`[${label}] 가로 넘침 ${name}: ${o.sw} > ${o.cw} (${culprits.join(", ")})`);
-  }
-}
+const VIEWPORTS = { m: { width: 390, height: 844 }, t: { width: 820, height: 1180 }, d: { width: 1440, height: 900 } };
+const CONFIGS = (process.env.E2E_CONFIGS ?? "m-light,m-dark,t-light,t-dark,d-light,d-dark").split(",").filter(Boolean);
 
 async function visit(page, label, name, path) {
   await page.goto(BASE + path, { waitUntil: "domcontentloaded" });
   await settle(page);
-  const h1 = await page.locator("h1").first().textContent({ timeout: 5000 }).catch(() => null);
-  if (!h1) fail(`[${label}] 제목(h1)이 없음: ${path}`);
   await checkOverflow(page, label, name);
+  await checkStructure(page, label, name);
+  await runAxe(page, label, name);
   await page.screenshot({ path: join(OUT, `${label}-${name}.png`), fullPage: true });
 }
 
-async function screens(browser, viewport, label, s) {
-  const { context, page } = await newContext(browser, viewport, label);
-  const paths = {
-    today: "/",
-    closet: "/closet",
-    "item-new": "/closet/new",
-    item: `/closet/${s.items.shirt.id}`,
-    "item-nophoto": `/closet/${s.items.nophoto.id}`,
-    outfits: "/outfits",
-    outfit: `/outfits/${s.outfit.id}`,
-    calendar: "/outfits/calendar",
-    ootd: "/outfits/ootd",
-    inspo: "/inspo",
-    "inspo-photo": `/inspo/${s.photo.id}`,
-    "inspo-collage": `/inspo/${s.collage.id}`,
-    wishlist: "/wishlist",
-    wish: `/wishlist/${s.wish.id}`,
-    travel: "/travel",
-    trip: `/travel/${s.trip.id}`,
-    profile: "/profile",
-    color: "/profile/color",
-    fitting: "/profile/fitting",
-    settings: "/settings",
-    more: "/more",
-    "not-found": "/no-such-page",
-  };
+async function screens(browser, config, s) {
+  const [v, scheme] = config.split("-");
+  const viewport = VIEWPORTS[v];
+  const label = config;
+  const { context, page } = await newContext(browser, viewport, label, { colorScheme: scheme });
+  const paths = screenPaths(s);
   for (const [name, path] of Object.entries(paths)) await visit(page, label, name, path);
-  ok(`[${label}] 화면 ${Object.keys(paths).length}개`);
+  const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+  if (theme !== scheme) fail(`[${label}] 시스템 테마 ${scheme} 인데 앱 테마가 ${theme}`);
+  ok(`[${label}] 화면 ${Object.keys(paths).length}개 (넘침·구조·axe)`);
+  if (scheme === "dark") return context.close();
 
-  // 내비게이션: 모바일 탭 바 + 더보기, 데스크톱 사이드바
+  // 내비게이션: 모바일 탭 바 + 더보기, 태블릿 레일·데스크톱 사이드바
   await page.goto(BASE + "/", { waitUntil: "domcontentloaded" });
   await settle(page);
   const navSel = viewport.width < 768 ? 'nav[aria-label="탭"] a' : 'nav[aria-label="주 메뉴"] a';
@@ -373,6 +185,221 @@ async function flowAiMocks(browser, s) {
   await context.close();
 }
 
+/** 포커스가 지금 이 선택자 안에 있는지 */
+const focusInside = (page, sel) => page.evaluate((s) => !!document.activeElement?.closest(s), sel);
+const focusedName = (page) => page.evaluate(() => document.activeElement?.getAttribute("aria-label") || document.activeElement?.textContent?.trim() || document.activeElement?.tagName);
+
+async function addShirtToBoard(page) {
+  await page.getByRole("button", { name: "옷장에서" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /흰 옥스퍼드 셔츠/ }).click();
+  await page.getByRole("button", { name: /1벌 올리기/ }).click();
+  await page.getByRole("dialog").waitFor({ state: "detached" });
+}
+
+/** 키보드·포커스: 시트/대화상자 포커스 가두기·되돌리기·Esc, 겹친 모달, 프롬프트 입력, 콜라주·세그먼트·달력·색 찍기 */
+async function flowKeyboard(browser) {
+  const label = "d-keys";
+  const { context, page } = await newContext(browser, { width: 1440, height: 900 }, label);
+  await page.goto(BASE + "/profile/fitting", { waitUntil: "domcontentloaded" });
+  await settle(page);
+
+  // 시트: 열면 포커스가 안으로, Tab 은 밖으로 못 나감, Esc 로 닫으면 연 버튼으로
+  const opener = page.getByRole("button", { name: "옷장에서" });
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("dialog").waitFor();
+  let escaped = 0;
+  for (let i = 0; i < 25; i++) {
+    await page.keyboard.press(i % 5 === 4 ? "Shift+Tab" : "Tab");
+    if (!(await focusInside(page, "[role=dialog]"))) escaped++;
+  }
+  if (escaped) fail(`[${label}] 시트에서 Tab 으로 포커스가 ${escaped}번 밖으로 나감`);
+
+  // 시트 위에 확인 대화상자: Tab 은 대화상자 안에서만, Esc 는 대화상자만 닫음
+  await page.evaluate(() => import("/src/components/Dialog.tsx").then((m) => void m.confirmDialog({ title: "겹친 대화상자 테스트" })));
+  await page.getByRole("alertdialog").waitFor();
+  let leaked = 0;
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press("Tab");
+    if (!(await focusInside(page, "[role=alertdialog]"))) leaked++;
+  }
+  if (leaked) fail(`[${label}] 시트 위 대화상자에서 Tab 이 ${leaked}번 아래 시트로 빠져나감`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  if (await page.getByRole("alertdialog").count()) fail(`[${label}] Esc 로 대화상자가 닫히지 않음`);
+  if (!(await page.getByRole("dialog").isVisible())) fail(`[${label}] 대화상자에서 Esc 한 번에 아래 시트까지 닫힘`);
+  else if (!(await focusInside(page, "[role=dialog]"))) fail(`[${label}] 대화상자를 닫은 뒤 포커스가 시트로 돌아오지 않음`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500);
+  if (await page.getByRole("dialog").count()) fail(`[${label}] Esc 로 시트가 닫히지 않음`);
+  if ((await focusedName(page)) !== "옷장에서") fail(`[${label}] 시트를 닫은 뒤 포커스가 연 버튼으로 돌아오지 않음 (${await focusedName(page)})`);
+  ok(`[${label}] 시트·겹친 대화상자: 포커스 가두기, Esc(맨 위만), 포커스 되돌리기`);
+
+  // 콜라주 키보드
+  await addShirtToBoard(page);
+  const layer = page.locator("[data-layer]").first();
+  await layer.focus();
+  const style = () => layer.evaluate((el) => ({ left: parseFloat(el.style.left), width: parseFloat(el.style.width), transform: el.style.transform }));
+  const s0 = await style();
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Shift+ArrowRight");
+  await page.keyboard.press("+");
+  await page.keyboard.press("r");
+  const s1 = await style();
+  if (!(s1.left > s0.left + 5)) fail(`[${label}] 콜라주: 화살표로 옮겨지지 않음 (${s0.left} → ${s1.left})`);
+  if (!(s1.width > s0.width)) fail(`[${label}] 콜라주: + 로 커지지 않음`);
+  if (!s1.transform.includes("rotate(15deg)")) fail(`[${label}] 콜라주: R 로 돌지 않음 (${s1.transform})`);
+
+  // 프롬프트 대화상자: 글자를 여러 개 칠 수 있고(예전에는 칠 때마다 전체 선택되어 마지막 글자만 남음), Esc 뒤 포커스 복귀
+  const save = page.getByRole("button", { name: "코디로 저장" });
+  await save.click();
+  const input = page.getByRole("alertdialog").getByRole("textbox");
+  await input.waitFor();
+  await page.keyboard.type("가을 출근 코디");
+  const typed = await input.inputValue();
+  if (typed !== "가을 출근 코디") fail(`[${label}] 프롬프트 입력칸에 친 글자가 "${typed}" (덮어써짐)`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  if ((await focusedName(page)) !== "코디로 저장") fail(`[${label}] 프롬프트를 닫은 뒤 포커스가 "코디로 저장" 으로 돌아오지 않음`);
+  await layer.focus();
+  await page.keyboard.press("Delete");
+  if (await page.locator("[data-layer]").count()) fail(`[${label}] 콜라주: Delete 로 빠지지 않음`);
+  ok(`[${label}] 콜라주 키보드(이동·크기·회전·빼기), 프롬프트 입력 (${typed})`);
+
+  // 세그먼트: 화살표로 바꾸고 포커스도 따라감
+  await page.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+  await settle(page);
+  await page.getByRole("radio", { name: "시밀러룩" }).focus();
+  await page.keyboard.press("ArrowRight");
+  const couple = page.getByRole("radio", { name: "커플룩" });
+  if ((await couple.getAttribute("aria-checked")) !== "true" || (await focusedName(page)) !== "커플룩") fail(`[${label}] 세그먼트: 화살표로 바뀌지 않음`);
+
+  // 달력: 화살표 하루, PageDown 다음 달
+  await page.goto(BASE + "/outfits/calendar", { waitUntil: "domcontentloaded" });
+  await settle(page);
+  const cell = page.locator('[role=grid] button[tabindex="0"]');
+  const d0 = await cell.getAttribute("data-date");
+  await cell.focus();
+  await page.keyboard.press("ArrowRight");
+  const d1 = await page.evaluate(() => document.activeElement?.getAttribute("data-date"));
+  const next = new Date(`${d0}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  if (d1 !== next.toISOString().slice(0, 10)) fail(`[${label}] 달력: → 키로 다음 날로 가지 않음 (${d0} → ${d1})`);
+  await page.keyboard.press("PageDown");
+  await page.waitForTimeout(300);
+  const d2 = await page.evaluate(() => document.activeElement?.getAttribute("data-date"));
+  if (!d2 || d2.slice(0, 7) === d1.slice(0, 7)) fail(`[${label}] 달력: PageDown 으로 다음 달로 가지 않음 (${d2})`);
+  const name = await page.evaluate(() => document.activeElement?.textContent?.trim());
+  if (!name || !name.includes(String(Number(d2.slice(8))))) fail(`[${label}] 달력 칸 이름에 보이는 날짜가 없음 (${name})`);
+
+  // 퍼스널 컬러: 사진 위 색 찍기 자리를 화살표로
+  await page.goto(BASE + "/profile/color", { waitUntil: "domcontentloaded" });
+  await settle(page);
+  await page.locator("input[type=file]").first().setInputFiles({ name: "face.png", mimeType: "image/png", buffer: png(200, 260, [214, 180, 160]) });
+  const app = page.getByRole("application");
+  await app.waitFor({ timeout: 10000 });
+  await app.focus();
+  await page.keyboard.press("ArrowRight");
+  const m1 = await app.locator("span[aria-hidden]").first().evaluate((el) => parseFloat(el.style.left)).catch(() => NaN);
+  await page.keyboard.press("Shift+ArrowRight");
+  const m2 = await app.locator("span[aria-hidden]").first().evaluate((el) => parseFloat(el.style.left)).catch(() => NaN);
+  if (!(m2 > m1)) fail(`[${label}] 색 찍기: 화살표로 위치가 움직이지 않음 (${m1} → ${m2})`);
+  ok(`[${label}] 세그먼트·달력(→, PageDown, 이름)·색 찍기 키보드`);
+  await context.close();
+}
+
+/** 콜라주 "배경 지우기" 결과가 IndexedDB 에 저장되고 다시 열면 복원되는지 (모델 대신 미리 만든 PNG) */
+async function flowCutouts(browser) {
+  const label = "d-cutout";
+  const { context, page } = await newContext(browser, { width: 1440, height: 900 }, label);
+  const cut = png(60, 80, [20, 120, 60], { alpha: true }).toString("base64");
+  let libLoads = 0;
+  await page.route(/@imgly\/background-removal/, (r) => {
+    libLoads++;
+    return r.fulfill({
+      contentType: "text/javascript",
+      headers: { "access-control-allow-origin": "*" },
+      body: `export async function removeBackground() { const b = Uint8Array.from(atob("${cut}"), (c) => c.charCodeAt(0)); return new Blob([b], { type: "image/png" }); }`,
+    });
+  });
+  await page.goto(BASE + "/profile/fitting", { waitUntil: "domcontentloaded" });
+  await settle(page);
+  await addShirtToBoard(page);
+  const layerImg = page.locator("[data-layer] img").first();
+  const original = await layerImg.getAttribute("src");
+  await page.getByRole("button", { name: "배경 지우기" }).click();
+  await page.getByText("배경을 지웠어요").first().waitFor({ timeout: 15000 }).catch(() => fail(`[${label}] 배경 지우기 완료 알림이 없음`));
+  const after = await layerImg.getAttribute("src");
+  if (!after?.startsWith("blob:")) fail(`[${label}] 배경 지운 사진으로 바뀌지 않음 (${after})`);
+  // 저장은 비동기 → IndexedDB 에 들어갈 때까지
+  const key = original.replace("/api/images/", "");
+  const stored = async () =>
+    page.evaluate(
+      (k) =>
+        new Promise((resolve) => {
+          const req = indexedDB.open("clothe-cutouts");
+          req.onsuccess = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains("cutouts")) return resolve(null);
+            const g = db.transaction("cutouts").objectStore("cutouts").get(k);
+            g.onsuccess = () => resolve(g.result ? { type: g.result.blob.type, size: g.result.blob.size } : null);
+            g.onerror = () => resolve(null);
+          };
+          req.onerror = () => resolve(null);
+        }),
+      key,
+    );
+  let rec = null;
+  for (let i = 0; i < 20 && !rec; i++) {
+    rec = await stored();
+    if (!rec) await page.waitForTimeout(200);
+  }
+  if (!rec || rec.size === 0) fail(`[${label}] IndexedDB 에 배경 지운 사진이 저장되지 않음`);
+  // 다시 열기 → 복원
+  await page.waitForTimeout(500); // 배치(localStorage) 저장 대기
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await settle(page);
+  await page.locator("[data-layer] img").first().waitFor();
+  let restored = null;
+  for (let i = 0; i < 20; i++) {
+    restored = await page.locator("[data-layer] img").first().getAttribute("src");
+    if (restored?.startsWith("blob:")) break;
+    await page.waitForTimeout(200);
+  }
+  if (!restored?.startsWith("blob:")) fail(`[${label}] 다시 열었을 때 배경 지운 사진이 복원되지 않음 (${restored})`);
+  // 모듈 단위: 저장 개수 제한(40) — 오래된 것부터 지움
+  const evicted = await page.evaluate(async () => {
+    const m = await import("/src/lib/cutouts.ts");
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" });
+    for (let i = 0; i < 42; i++) await m.saveCutout(`img/test-${i}.png`, blob);
+    const got = await m.loadCutouts(["img/test-0.png", "img/test-1.png", "img/test-41.png"]);
+    return [...got.keys()];
+  });
+  if (evicted.includes("img/test-0.png") || !evicted.includes("img/test-41.png")) fail(`[${label}] 저장 개수 제한이 오래된 것부터 지우지 않음 (${evicted.join(",")})`);
+  // 원래 사진으로 → IndexedDB 에서도 지움
+  await page.locator("[data-layer]").first().click();
+  await page.getByRole("button", { name: "원래 사진으로" }).click();
+  await page.waitForTimeout(300);
+  if ((await page.locator("[data-layer] img").first().getAttribute("src")) !== original) fail(`[${label}] 원래 사진으로 돌아가지 않음`);
+  if (await stored()) fail(`[${label}] 원래 사진으로 바꿨는데 IndexedDB 에 남아 있음`);
+  if (libLoads !== 1) fail(`[${label}] 배경 제거 라이브러리를 ${libLoads}번 받음 (1번이어야 함)`);
+  if (!failures.some((f) => f.includes(label))) ok(`[${label}] 배경 지운 사진: IndexedDB 저장 → 다시 열면 복원 → 개수 제한 → 원래 사진으로 되돌리면 삭제`);
+  await context.close();
+}
+
+/** 동작 줄이기: 애니메이션이 사실상 꺼지는지 */
+async function flowReducedMotion(browser) {
+  const label = "m-reduce";
+  const { context, page } = await newContext(browser, { width: 390, height: 844 }, label, { reducedMotion: "reduce", colorScheme: "dark" });
+  await page.goto(BASE + "/profile/fitting", { waitUntil: "domcontentloaded" });
+  await settle(page);
+  await page.getByRole("button", { name: "옷장에서" }).click();
+  const dur = await page.getByRole("dialog").evaluate((el) => parseFloat(getComputedStyle(el).animationDuration) * 1000);
+  if (!(dur < 1)) fail(`[${label}] 동작 줄이기인데 시트 애니메이션이 ${dur}ms`);
+  else ok(`[${label}] 동작 줄이기: 시트 애니메이션 꺼짐`);
+  await context.close();
+}
+
 /* ───────────── 실행 ───────────── */
 
 let server;
@@ -384,19 +411,20 @@ try {
   ok("시드 데이터");
   const { chromium } = loadPlaywright();
   browser = await chromium.launch();
-  await screens(browser, { width: 390, height: 844 }, "m", s);
-  await screens(browser, { width: 1440, height: 900 }, "d", s);
+  for (const config of CONFIGS) await screens(browser, config, s);
   await flowCollageCover(browser);
   await flowLinks(browser, s);
   await flowAiMocks(browser, s);
+  await flowKeyboard(browser);
+  await flowCutouts(browser);
+  await flowReducedMotion(browser);
 } catch (e) {
   fail(`실행 중 오류: ${e instanceof Error ? e.stack : e}`);
 } finally {
   await browser?.close().catch(() => {});
   await server?.close().catch(() => {});
   console.log(`스크린숏: ${OUT}`);
-  if (!KEEP && !process.env.E2E_OUT) rmSync(TMP, { recursive: true, force: true });
-  else if (!KEEP) rmSync(join(TMP, "state"), { recursive: true, force: true });
+  cleanup();
 }
 
 if (failures.length) {

@@ -92,7 +92,7 @@ export default function Outfits() {
             return (
               <AppLink key={o.id} to={`/outfits/${o.id}`} aria-disabled={pending} className={`pressable-soft block rounded-lg ${pending ? "pointer-events-none opacity-60" : ""}`}>
                 <Card className="h-full transition-shadow duration-(--dur-base) hover:shadow-[0_0_0_1px_var(--line-strong)]">
-                  <h3 className="truncate text-headline">{o.name}</h3>
+                  <h2 className="truncate text-headline">{o.name}</h2>
                   <p className="mb-4 text-footnote text-muted">
                     {SOURCE_LABEL[o.source]} · {o.item_ids.length}벌
                   </p>

@@ -1065,6 +1065,34 @@ describe("검수 1회차 추가", () => {
   });
 });
 
+describe("검수 2회차 추가", () => {
+  it("단축어: 이미지 주소 + target=wishlist 는 위시리스트로 (target 이 없으면 스크랩)", async () => {
+    cookie = "";
+    route({ "img.example.com/a.jpg": () => new Response(imageBytes("jpeg", 40), { headers: { "content-type": "image/jpeg" } }) });
+    const send = (body: Json) =>
+      app.request("http://localhost/api/webhook/shortcut", { method: "POST", headers: { "x-shortcut-token": "shortcut-token", "content-type": "application/json" }, body: JSON.stringify(body) }, t.env);
+    const w = (await (await send({ url: "https://img.example.com/a.jpg", target: "wishlist", note: "봄 니트" })).json()) as Json;
+    expect(w).toMatchObject({ ok: true, type: "wishlist" });
+    const i = (await (await send({ url: "https://img.example.com/a.jpg" })).json()) as Json;
+    expect(i).toMatchObject({ ok: true, type: "inspiration" });
+    cookie = await sessionCookie();
+    expect((await get(`/wishlist/${w.id}`)).body).toMatchObject({ name: "봄 니트", image_url: "https://img.example.com/a.jpg" });
+    expect((await get(`/wishlist/${w.id}`)).body.image_key).toMatch(/^img\//);
+  });
+
+  it("단축어: 토큰이 틀리면 target=closet 도 저장하지 않는다", async () => {
+    cookie = "";
+    const r = await app.request(
+      "http://localhost/api/webhook/shortcut",
+      { method: "POST", headers: { "x-shortcut-token": "wrong", "content-type": "application/json" }, body: JSON.stringify({ url: "https://shop.example.com/p/1", target: "closet" }) },
+      t.env,
+    );
+    expect(r.status).toBe(401);
+    cookie = await sessionCookie();
+    expect((await get("/items")).body).toEqual([]);
+  });
+});
+
 describe("쿼리 수 (N+1 방지)", () => {
   it("위시리스트 20개 조회에 쿼리가 늘어나지 않는다", async () => {
     for (let i = 0; i < 20; i++) await post("/wishlist", { name: `옷 ${i}` });

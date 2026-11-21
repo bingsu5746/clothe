@@ -173,7 +173,7 @@ function AddWishSheet({ open, onClose }: { open: boolean; onClose: () => void })
             링크로 추가
           </Button>
         </div>
-        <div className="flex items-center gap-3 text-caption text-faint before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">또는</div>
+        <div className="flex items-center gap-3 text-caption text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">또는</div>
         <div>
           <Field label="이름만 적어 두기">
             <Input placeholder="예: 베이지 트렌치코트" value={name} onChange={(e) => setName(e.target.value)} />

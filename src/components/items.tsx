@@ -29,7 +29,7 @@ export function ItemImage({ item, className = "", ratio = ITEM_RATIO, loading, s
       loading={loading}
       className={`rounded-md ${className}`}
       fallback={
-        <div className="flex flex-col items-center gap-1.5 p-2 text-center text-caption text-faint">
+        <div className="flex flex-col items-center gap-1.5 p-2 text-center text-caption text-muted">
           <HangerIcon size={24} />
           {showName && item?.name && <span className="line-clamp-2">{item.name}</span>}
         </div>
@@ -79,7 +79,7 @@ export function OutfitCollage({ ids, extra, max = 4 }: { ids: string[]; extra?: 
         </div>
       )}
       {missing > 0 && !overflow && shown.length + (extra ? 1 : 0) < max && (
-        <div className="grid place-items-center rounded-sm bg-surface-2 p-1 text-center text-caption text-faint" style={{ aspectRatio: ITEM_RATIO }}>
+        <div className="grid place-items-center rounded-sm bg-surface-2 p-1 text-center text-caption text-muted" style={{ aspectRatio: ITEM_RATIO }}>
           삭제된 옷 {missing}
         </div>
       )}

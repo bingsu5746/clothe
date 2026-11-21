@@ -32,9 +32,14 @@ export default function Layout() {
   );
 }
 
+/** 동작 줄이기 설정이면 바로 이동 (CSS 의 scroll-behavior 는 JS 의 behavior: "smooth" 를 막지 못한다) */
+function scrollBehavior(): ScrollBehavior {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
 function scrollTopIfCurrent(active: boolean, to: string, pathname: string) {
   // 이미 보고 있는 탭을 다시 누르면 맨 위로 (iOS 탭 바 관례)
-  if (active && pathname === to) window.scrollTo({ top: 0, behavior: "smooth" });
+  if (active && pathname === to) window.scrollTo({ top: 0, behavior: scrollBehavior() });
 }
 
 function Sidebar({ pathname }: { pathname: string }) {
@@ -85,7 +90,7 @@ function TabBar({ pathname }: { pathname: string }) {
       to={to}
       aria-current={active ? "page" : undefined}
       onClick={() => scrollTopIfCurrent(active, to, pathname)}
-      className={`flex h-(--tabbar-h) min-w-0 flex-1 flex-col items-center justify-center gap-[3px] text-[10.5px] leading-none font-medium transition-[color,transform] duration-(--dur-fast) active:scale-95 ${active ? "text-ink" : "text-muted"}`}
+      className={`flex h-(--tabbar-h) min-w-0 flex-1 flex-col items-center justify-center gap-[3px] text-[10.5px] leading-none font-medium transition-[color,transform] duration-(--dur-fast) active:scale-95 ${active ? "text-ink" : "text-ink-2"}`}
     >
       <Icon size={25} strokeWidth={active ? 2 : 1.55} />
       <span className={active ? "font-semibold" : ""}>{label}</span>

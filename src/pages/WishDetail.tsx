@@ -118,7 +118,7 @@ function WishDetailView({ id }: { id: string }) {
             loading="eager"
             className="mx-auto w-full max-w-[280px] rounded-lg md:max-w-none"
             fallback={
-              <div className="flex flex-col items-center gap-2 text-footnote text-faint">
+              <div className="flex flex-col items-center gap-2 text-footnote text-muted">
                 <HeartIcon size={32} strokeWidth={1.3} />
                 사진이 없어요
               </div>
@@ -176,7 +176,7 @@ function WishDetailView({ id }: { id: string }) {
                   }} />
               </Field>
             </div>
-            <p className="text-footnote text-faint">고친 내용은 칸을 벗어나면 바로 저장돼요.</p>
+            <p className="text-footnote text-muted">고친 내용은 칸을 벗어나면 바로 저장돼요.</p>
             <Notice>{err}</Notice>
           </section>
 

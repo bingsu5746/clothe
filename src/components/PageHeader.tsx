@@ -25,6 +25,8 @@ export interface PageHeaderProps {
   /** 큰 제목을 쓸지. 기본: back이 없으면(최상위 화면) 큰 제목 */
   large?: boolean;
   width?: PageWidth;
+  /** 작은 제목의 제목 수준. 분할 보기의 오른쪽 패널처럼 목록 화면(h1) 옆에 함께 보일 때는 2 */
+  titleLevel?: 1 | 2;
 }
 
 /**
@@ -33,7 +35,7 @@ export interface PageHeaderProps {
  * - 스크롤해서 큰 제목이 바 밑으로 들어가면 작은 제목이 나타나고 바에 반투명 배경이 깔린다 (iOS 큰 제목 방식).
  * - 상단 안전 영역(노치)은 바가 알아서 비운다.
  */
-export function PageHeader({ title, eyebrow, subtitle, back, backStyle = "back", right, large = !back, width = "default" }: PageHeaderProps) {
+export function PageHeader({ title, eyebrow, subtitle, back, backStyle = "back", right, large = !back, width = "default", titleLevel = 1 }: PageHeaderProps) {
   const nav = useNav();
   const goBack = useGoBack();
   const barRef = useRef<HTMLDivElement>(null);
@@ -68,7 +70,7 @@ export function PageHeader({ title, eyebrow, subtitle, back, backStyle = "back",
               large && !scrolled ? "translate-y-1 opacity-0" : "opacity-100"
             }`}
           >
-            {large ? title : <h1 className="truncate">{title}</h1>}
+            {large ? title : titleLevel === 2 ? <h2 className="truncate">{title}</h2> : <h1 className="truncate">{title}</h1>}
           </div>
           <div className="ml-auto flex items-center gap-1.5">{right}</div>
         </div>

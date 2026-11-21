@@ -2,15 +2,6 @@ export function newId(): string {
   return crypto.randomUUID();
 }
 
-export function parseJson<T>(value: unknown, fallback: T): T {
-  if (typeof value !== "string" || value === "") return fallback;
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 /** JSON 문자열을 파싱한다. 실패하면 undefined (타입은 호출하는 쪽에서 검증) */
 export function parseJsonUnknown(value: unknown): unknown {
   if (typeof value !== "string" || value === "") return undefined;
