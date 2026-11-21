@@ -60,7 +60,7 @@ export function ToastHost() {
 
   return (
     <>
-      <LiveRegion message={state?.message ?? ""} error={state?.tone === "error"} />
+      <LiveRegion message={state ? state.message + (state.id % 2 ? "\u00a0" : "") : ""} error={state?.tone === "error"} />
       {mounted && shown && <ToastView shown={shown} closing={closing} />}
     </>
   );
@@ -69,6 +69,7 @@ export function ToastHost() {
 /**
  * 화면 읽기 프로그램 알림. 처음부터 DOM 에 있어야 바뀐 글자를 읽어 주므로(새로 끼워 넣은 live region 은 대부분 무시됨)
  * 항상 그려 두고 글자만 바꾼다. 모달이 열려도 inert 가 되지 않게 data-live-region.
+ * 같은 문장이 연달아 와도(예: "저장했어요" 두 번) 다시 읽히도록 토스트마다 끝에 보이지 않는 공백(NBSP)을 번갈아 붙여 글자를 바꾼다.
  */
 function LiveRegion({ message, error }: { message: string; error: boolean }) {
   return createPortal(

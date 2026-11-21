@@ -1,5 +1,5 @@
 import type { DormantItem, Item } from "../../shared/types";
-import { daysBetween, isDateString } from "./util";
+import { daysBetween, isDateString, todayKST } from "./util";
 
 /**
  * 장롱템 기준 (docs/api-contract.md에도 같은 내용):
@@ -16,10 +16,21 @@ export const DORMANT_RULES = {
   highCpwMaxWears: 10,
 } as const;
 
-function dateOf(v: string | null): string | null {
-  const d = v?.slice(0, 10) ?? null;
+/**
+ * 날짜(YYYY-MM-DD) 또는 D1 의 datetime('now') 값(UTC, "YYYY-MM-DD HH:MM:SS")을 한국 날짜로.
+ * 예전에는 등록 시각의 UTC 날짜를 그대로 써서, 한국 시간 0~9시에 등록한 옷은 하루 일찍 장롱템이 됐다.
+ */
+export function kstDateOf(v: string | null): string | null {
+  if (!v) return null;
+  const m = v.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})?$/);
+  if (m) {
+    const t = Date.parse(`${m[1]}T${m[2]}${m[3] ?? "Z"}`);
+    return Number.isNaN(t) ? null : todayKST(new Date(t));
+  }
+  const d = v.slice(0, 10);
   return isDateString(d) ? d : null;
 }
+const dateOf = kstDateOf;
 
 export function costPerWear(item: Pick<Item, "purchase_price" | "wear_count">): number | null {
   if (!item.purchase_price || item.purchase_price <= 0) return null;

@@ -394,6 +394,7 @@
 - `PATCH /trips/{id}/checklist/{entryId}` `{ packed?: boolean, label?: string }` → `Trip`. 옷 항목 이름 변경은 400. 404 항목 없음
 - `PUT /trips/{id}/checklist` `{ packed: boolean }` → `Trip` (전체 체크/해제)
 - `DELETE /trips/{id}/checklist/{entryId}` → `Trip`
+- 체크리스트를 바꾸는 요청(위 4개와 계획 생성)은 서버에서 비교 후 교체(compare-and-swap)로 저장해서, 동시에 와도 서로의 변경을 덮어쓰지 않는다. 계획 생성은 AI 응답을 받은 뒤 그 시점의 체크리스트와 합친다. 계속 충돌하면(8번) 409.
 
 ---
 

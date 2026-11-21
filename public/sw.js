@@ -9,7 +9,7 @@
  * - Pretendard 글꼴(jsDelivr, 버전이 박힌 주소): 캐시 우선.
  * 이 파일은 빌드 결과 목록을 담지 않으므로 새 워커가 곧바로 활성화되어도 안전하다 (skipWaiting).
  */
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL = `clothe-shell-${VERSION}`;
 const ASSETS = `clothe-assets-${VERSION}`;
 const FONTS = "clothe-fonts-v1";

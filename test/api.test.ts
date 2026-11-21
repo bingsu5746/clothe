@@ -232,6 +232,25 @@ describe("착용 기록", () => {
     expect(t.db.rows("SELECT id FROM outfit_logs")).toHaveLength(2);
   });
 
+  it("날짜를 안 보내면 한국 날짜로 기록한다 (23:59 / 00:01 KST 경계)", async () => {
+    const a = await addItem();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-11-20T14:59:00Z")); // 11-20 23:59 KST
+      const late = await post("/items/wear", { item_ids: [a] });
+      expect(late.body.worn_date).toBe("2026-11-20");
+      vi.setSystemTime(new Date("2026-11-20T15:01:00Z")); // 11-21 00:01 KST (UTC 로는 아직 11-20)
+      const early = await post("/items/wear", { item_ids: [a] });
+      expect(early.body.worn_date).toBe("2026-11-21");
+      expect(early.body.duplicate).toBe(false);
+      expect(early.body.items[0]).toMatchObject({ wear_count: 2, last_worn_date: "2026-11-21" });
+      // 00:01 KST 에 "내일"(11-22)까지는 허용, 모레는 미래
+      expect((await post("/items/wear", { item_ids: [a], date: "2026-11-23" })).status).toBe(400);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("/items/wear 검증: 빈 목록, 없는 옷, 잘못된 날짜, 미래 날짜", async () => {
     const a = await addItem();
     expect((await post("/items/wear", { item_ids: [] })).status).toBe(400);

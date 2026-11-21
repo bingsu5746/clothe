@@ -100,5 +100,9 @@ describe("todayKST", () => {
   it("UTC 15시 이후는 한국 날짜로 다음 날", () => {
     expect(todayKST(new Date("2026-11-14T15:30:00Z"))).toBe("2026-11-15");
     expect(todayKST(new Date("2026-11-14T14:30:00Z"))).toBe("2026-11-14");
+    // 한국 23:59 / 00:01 경계
+    expect(todayKST(new Date("2026-11-14T14:59:00Z"))).toBe("2026-11-14"); // 23:59 KST
+    expect(todayKST(new Date("2026-11-14T15:01:00Z"))).toBe("2026-11-15"); // 00:01 KST
+    expect(todayKST(new Date("2026-12-31T15:00:00Z"))).toBe("2027-01-01"); // 연말 자정
   });
 });

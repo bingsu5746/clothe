@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Item, OotdPiece } from "../shared/types";
 import { signedImagePath, verifySignedImage } from "../worker/lib/auth";
 import { coerceLinks, coerceValidation, rowToItem, rowToLog, rowToWish } from "../worker/lib/db";
-import { costPerWear, findDormantItems } from "../worker/lib/dormant";
+import { costPerWear, findDormantItems, kstDateOf } from "../worker/lib/dormant";
 import { buildGeminiBody, extractJsonText, parseGeminiJsonResponse } from "../worker/lib/gemini";
 import { applyVerification, ootdPrompt, ootdVerifyPrompt, pickVerifyTargets, sanitizeOotd, suggestedItemIds } from "../worker/lib/ootd";
 import { colorPrompt, normalizeHex, profileForPrompt, rowToProfile, sanitizeBodyAnalysis, sanitizeColorAnalysis, sanitizePalette, sanitizeSamples } from "../worker/lib/profile";
@@ -203,6 +203,30 @@ describe("장롱템 (findDormantItems)", () => {
     expect(d.find((x) => x.item_id === "pricey")).toMatchObject({ reasons: ["high_cpw"], cpw: 150000 });
     expect([...d].sort((a, b) => b.score - a.score)).toEqual(d);
     expect(findDormantItems(items, today, 1)).toHaveLength(1);
+  });
+
+  it("경계값: 30일·60일·20,000원·10번, 등록 시각은 한국 날짜로", () => {
+    const ids = (xs: ReturnType<typeof item>[]) => findDormantItems(xs, today).map((x) => x.item_id).sort();
+    // 등록 30일째부터 never_worn (29일은 아님). 2026-10-16 15:30 UTC = 한국 10-17 00:30 → 29일째라 아직 아님
+    expect(ids([item({ id: "d30", created_at: "2026-10-16 00:00:00" }), item({ id: "d29", created_at: "2026-10-17 00:00:00" }), item({ id: "kst", created_at: "2026-10-16 15:30:00" })])).toEqual(["d30"]);
+    expect(kstDateOf("2026-10-16 15:30:00")).toBe("2026-10-17");
+    expect(kstDateOf("2026-10-16 14:59:59")).toBe("2026-10-16");
+    expect(kstDateOf("2026-10-16T15:00:00.000Z")).toBe("2026-10-17");
+    expect(kstDateOf("2026-10-16")).toBe("2026-10-16");
+    expect(kstDateOf("garbage")).toBeNull();
+    // 마지막 착용 60일째부터 long_unworn
+    const old = "2025-01-01 00:00:00";
+    expect(ids([item({ id: "u60", wear_count: 3, last_worn_date: "2026-09-16", created_at: old }), item({ id: "u59", wear_count: 3, last_worn_date: "2026-09-17", created_at: old })])).toEqual(["u60"]);
+    // high_cpw: 회당 20,000원 이상 + 10번 미만
+    const recent = "2026-11-10";
+    expect(
+      ids([
+        item({ id: "c20000", wear_count: 2, last_worn_date: recent, purchase_price: 40000, created_at: old }),
+        item({ id: "c19999", wear_count: 2, last_worn_date: recent, purchase_price: 39998, created_at: old }),
+        item({ id: "w10", wear_count: 10, last_worn_date: recent, purchase_price: 500000, created_at: old }),
+        item({ id: "w9", wear_count: 9, last_worn_date: recent, purchase_price: 500000, created_at: old }),
+      ]),
+    ).toEqual(["c20000", "w9"]);
   });
 
   it("CPW: 0회 착용이면 가격 그대로, 가격이 없으면 null", () => {

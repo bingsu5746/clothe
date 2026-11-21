@@ -949,6 +949,122 @@ async function journeyProfile(browser) {
   await context.close();
 }
 
+/* ───────────── h. 콜라주 보드 → 코디로 저장(대표 그림) → 코디 목록/상세 ───────────── */
+
+async function journeyCollage(browser) {
+  const label = "h-콜라주";
+  const { context, page } = await phone(browser, label);
+  await context.addCookies([{ name: "clothe_session", value: await sessionValue(), url: BASE }]);
+  await go(page, "/profile/fitting");
+  await page.getByRole("button", { name: "옷장에서" }).tap();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("button", { name: /흰 옥스퍼드 셔츠/ }).tap();
+  await sheet.getByRole("button", { name: /차콜 와이드 슬랙스/ }).tap();
+  await page.getByRole("button", { name: /2벌 올리기/ }).tap();
+  await sheet.waitFor({ state: "detached" });
+  if ((await page.locator("[data-layer]").count()) !== 2) fail(`[${label}] 보드에 옷이 ${await page.locator("[data-layer]").count()}벌`);
+  // 손가락으로 끌어 옮기기
+  const layer = page.locator("[data-layer]").last(); // 맨 위 레이어 (가운데를 누르면 이게 잡힌다)
+  const left0 = await layer.evaluate((el) => parseFloat(el.style.left));
+  const b = await layer.boundingBox();
+  const cdp = await context.newCDPSession(page);
+  const pt = (x, y) => [{ x: Math.round(x), y: Math.round(y) }];
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: pt(b.x + b.width / 2, b.y + b.height / 2) });
+  for (let i = 1; i <= 5; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: pt(b.x + b.width / 2 + i * 8, b.y + b.height / 2 + i * 4) });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+  await page.waitForTimeout(500); // Chrome 은 합성 터치 직후의 탭을 같은 제스처(더블 탭)로 보고 click 을 만들지 않을 때가 있다
+  const left1 = await layer.evaluate((el) => parseFloat(el.style.left));
+  if (!(left1 > left0)) fail(`[${label}] 터치로 끌었는데 옮겨지지 않음 (${left0} → ${left1})`);
+  // (합성 터치는 끝난 뒤 바로 다음 탭을 제스처로 묶을 수 있어서 잠깐 기다린 뒤 누른다)
+  await page.getByRole("button", { name: "코디로 저장" }).tap();
+  const box = page.getByRole("alertdialog").getByRole("textbox");
+  await box.waitFor();
+  await box.press("ControlOrMeta+a");
+  await imeType(page, box, "주말 브런치 코디");
+  if ((await box.inputValue()) !== "주말 브런치 코디") fail(`[${label}] 코디 이름 입력칸 "${await box.inputValue()}"`);
+  const [res] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith("/api/outfits") && r.request().method() === "POST", { timeout: 20000 }),
+    page.getByRole("alertdialog").getByRole("button", { name: "저장" }).tap(),
+  ]);
+  const outfit = await res.json();
+  if (outfit.name !== "주말 브런치 코디" || outfit.item_ids.length !== 2 || !outfit.cover_image_key) fail(`[${label}] 저장한 코디 ${JSON.stringify(outfit)}`);
+  // 대표 그림이 실제 이미지인지
+  const img = await fetch(`${BASE}/api/images/${outfit.cover_image_key}`, { headers: { cookie: `clothe_session=${await sessionValue()}` } });
+  if (!img.ok || !(img.headers.get("content-type") ?? "").startsWith("image/")) fail(`[${label}] 대표 그림을 받을 수 없음 ${img.status}`);
+  await page.locator('nav[aria-label="탭"]').getByRole("link", { name: "코디" }).tap();
+  await page.waitForURL((u) => u.pathname === "/outfits");
+  await expectText(page, label, "주말 브런치 코디", "코디 목록");
+  await page.locator(`a[href="/outfits/${outfit.id}"]`).first().tap();
+  await page.waitForURL(new RegExp(`/outfits/${outfit.id}$`));
+  await settle(page);
+  if (!(await page.getByRole("img", { name: /콜라주/ }).first().isVisible())) fail(`[${label}] 코디 상세에 대표 그림이 없음`);
+  // 이름 바꾸기 (프롬프트, 여러 단어)
+  await page.getByRole("button", { name: "이름 변경" }).tap();
+  const rn = page.getByRole("alertdialog").getByRole("textbox");
+  await rn.waitFor();
+  await rn.press("ControlOrMeta+a");
+  await page.keyboard.type("일요일 브런치 코디 최종");
+  await page.keyboard.press("Enter");
+  await page.waitForResponse((r) => r.url().endsWith(`/api/outfits/${outfit.id}`) && r.request().method() === "PATCH");
+  const saved = (await api("GET", "/outfits")).find((o) => o.id === outfit.id);
+  if (saved?.name !== "일요일 브런치 코디 최종") fail(`[${label}] 이름 변경 결과 "${saved?.name}"`);
+  await shot(page, "h-outfit");
+  await context.close();
+}
+
+/* ───────────── i. 테마 유지(깜빡임 없음) → 로그아웃 → 로그인 ───────────── */
+
+async function journeyThemeLogout(browser) {
+  const label = "i-테마";
+  const { context, page } = await phone(browser, label, { colorScheme: "dark" });
+  await context.addCookies([{ name: "clothe_session", value: await sessionValue(), url: BASE }]);
+  // body 가 생기는 순간(첫 그림 전)의 테마를 기록
+  await context.addInitScript(() => {
+    new MutationObserver((_, obs) => {
+      if (document.body) {
+        window.__firstTheme = document.documentElement.dataset.theme;
+        window.__firstBg = getComputedStyle(document.documentElement).backgroundColor;
+        obs.disconnect();
+      }
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await go(page, "/settings");
+  await page.getByRole("radio", { name: "라이트" }).tap();
+  if ((await page.evaluate(() => document.documentElement.dataset.theme)) !== "light") fail(`[${label}] 라이트를 골랐는데 바로 바뀌지 않음`);
+  for (let i = 0; i < 2; i++) {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const first = await page.evaluate(() => [window.__firstTheme, window.__firstBg]);
+    if (first[0] !== "light" || first[1] !== "rgb(250, 249, 247)") fail(`[${label}] 새로고침 첫 그림이 라이트가 아님 (${first.join(", ")}) — 깜빡임`);
+  }
+  await settle(page);
+  if ((await page.getByRole("radio", { name: "라이트" }).getAttribute("aria-checked")) !== "true") fail(`[${label}] 새로고침 뒤 설정 화면의 테마 선택이 라이트가 아님`);
+  const meta = await page.evaluate(() => [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.content));
+  if (meta.some((c) => c !== "#faf9f7")) fail(`[${label}] 상태 표시줄 색 ${meta.join(",")}`);
+  await page.getByRole("radio", { name: "시스템" }).tap();
+  if ((await page.evaluate(() => document.documentElement.dataset.theme)) !== "dark") fail(`[${label}] 시스템(다크)으로 돌아가지 않음`);
+  // 로그아웃 → 로그인 화면 → 다시 로그인 → 데이터가 그대로
+  await page.getByRole("button", { name: "로그아웃" }).tap();
+  await page.getByRole("alertdialog").getByRole("button", { name: "로그아웃" }).tap();
+  await page.getByLabel("PIN").waitFor({ timeout: 10000 });
+  if ((await context.cookies()).some((c) => c.name === "clothe_session" && c.value)) fail(`[${label}] 로그아웃 뒤에도 세션 쿠키가 남음`);
+  const me = await page.evaluate(() => fetch("/api/items").then((r) => r.status));
+  if (me !== 401) fail(`[${label}] 로그아웃 뒤 API ${me} (401이어야 함)`);
+  // 틀린 PIN
+  await page.getByLabel("PIN").tap();
+  await page.keyboard.type("9999");
+  await page.keyboard.press("Enter");
+  await expectText(page, label, "PIN이 맞지 않아요", "틀린 PIN 안내");
+  if ((await page.getByLabel("PIN").inputValue()) !== "") fail(`[${label}] 틀린 PIN 뒤 입력칸이 비워지지 않음`);
+  await page.keyboard.type(PIN);
+  await page.keyboard.press("Enter");
+  await page.locator('nav[aria-label="탭"]').waitFor({ timeout: 10000 });
+  await page.locator('nav[aria-label="탭"]').getByRole("link", { name: "옷장" }).tap();
+  await expectText(page, label, "흰 옥스퍼드 셔츠 레귤러핏", "다시 로그인한 뒤 옷장");
+  await shot(page, "i-relogin");
+  await context.close();
+}
+
 /* ───────────── 실행 ───────────── */
 
 let server;
@@ -970,6 +1086,8 @@ try {
   if (!process.env.J || process.env.J.includes("e")) await step("e-OOTD", () => journeyOotd(browser));
   if (!process.env.J || process.env.J.includes("f")) await step("f-여행", () => journeyTrip(browser));
   if (!process.env.J || process.env.J.includes("g")) await step("g-프로필", () => journeyProfile(browser));
+  if (!process.env.J || process.env.J.includes("h")) await step("h-콜라주", () => journeyCollage(browser));
+  if (!process.env.J || process.env.J.includes("i")) await step("i-테마", () => journeyThemeLogout(browser));
 } catch (e) {
   fail(`실행 중 오류: ${e instanceof Error ? e.stack : e}`);
 } finally {
